@@ -14,6 +14,7 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/config"
+	"github.com/Slambot01/resilient-settlement-orchestrator/internal/database"
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/handler"
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/middleware"
 )
@@ -42,6 +43,31 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
+	ctx := context.Background()
+
+	// ── Run database migrations ─────────────────────────────────────
+	if err := database.RunMigrations(cfg.Database, "migrations"); err != nil {
+		logger.Error("failed to run migrations", slog.Any("error", err))
+		os.Exit(1)
+	}
+
+	// ── Connect to PostgreSQL ───────────────────────────────────────
+	dbPool, err := database.NewPool(ctx, cfg.Database)
+	if err != nil {
+		logger.Error("failed to connect to database", slog.Any("error", err))
+		os.Exit(1)
+	}
+	defer dbPool.Close()
+
+	// ── Connect to Redis ────────────────────────────────────────────
+	redisClient, err := database.NewRedisClient(ctx, cfg.Redis)
+	if err != nil {
+		logger.Warn("failed to connect to redis, continuing without cache", slog.Any("error", err))
+		// Redis is non-critical for startup — continue without it
+	} else {
+		defer redisClient.Close()
+	}
+
 	// ── Create router ───────────────────────────────────────────────
 	r := chi.NewRouter()
 
@@ -58,7 +84,7 @@ func main() {
 	r.Get("/healthz", healthHandler.Health)
 	r.Get("/readyz", healthHandler.Ready)
 
-	// API v1 routes (placeholder — will be populated in later commits)
+	// API v1 routes (will be populated in later commits)
 	r.Route("/v1", func(r chi.Router) {
 		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -75,11 +101,9 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	// Channel to listen for shutdown signals
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGTERM)
 
-	// Start server in goroutine
 	go func() {
 		logger.Info("server starting",
 			slog.Int("port", cfg.Server.Port),
@@ -91,11 +115,9 @@ func main() {
 		}
 	}()
 
-	// Block until shutdown signal
 	sig := <-shutdown
 	logger.Info("shutdown signal received", slog.String("signal", sig.String()))
 
-	// Graceful shutdown with 10-second timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
