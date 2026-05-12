@@ -13,10 +13,13 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 
+	"github.com/Slambot01/resilient-settlement-orchestrator/internal/adapter"
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/config"
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/database"
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/handler"
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/middleware"
+	"github.com/Slambot01/resilient-settlement-orchestrator/internal/models"
+	"github.com/Slambot01/resilient-settlement-orchestrator/internal/service"
 )
 
 func main() {
@@ -68,6 +71,33 @@ func main() {
 		defer redisClient.Close()
 	}
 
+	// ── Initialize Services & Adapters ──────────────────────────────
+	
+	ledgerService := service.NewLedgerService(dbPool)
+
+	paymentRouter := service.NewPaymentRouter()
+	
+	// Register Mock PSP
+	mockPSP := adapter.NewMockPSP(adapter.DefaultMockConfig())
+	paymentRouter.RegisterAdapter(models.PSPMock, mockPSP)
+	
+	// Set default rule to route everything to Mock PSP for now
+	paymentRouter.LoadRules([]models.RoutingRule{
+		{
+			Name:       "default_mock_rule",
+			PrimaryPSP: models.PSPMock,
+			Priority:   100,
+		},
+	})
+
+	paymentService := service.NewPaymentService(dbPool, paymentRouter, ledgerService)
+
+	// ── Initialize Handlers ─────────────────────────────────────────
+	
+	healthHandler := handler.NewHealthHandler(cfg)
+	paymentHandler := handler.NewPaymentHandler(paymentService)
+	ledgerHandler := handler.NewLedgerHandler(ledgerService)
+
 	// ── Create router ───────────────────────────────────────────────
 	r := chi.NewRouter()
 
@@ -79,16 +109,23 @@ func main() {
 	r.Use(chimw.Timeout(30 * time.Second))
 
 	// ── Register routes ─────────────────────────────────────────────
-	healthHandler := handler.NewHealthHandler(cfg)
-
 	r.Get("/healthz", healthHandler.Health)
 	r.Get("/readyz", healthHandler.Ready)
 
-	// API v1 routes (will be populated in later commits)
+	// API v1 routes
 	r.Route("/v1", func(r chi.Router) {
 		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`{"service":"payment-orchestrator","version":"v1"}`))
+		})
+		
+		r.Route("/payments", func(r chi.Router) {
+			r.Post("/", paymentHandler.CreatePayment)
+			r.Get("/{id}", paymentHandler.GetPayment)
+		})
+		
+		r.Route("/ledger", func(r chi.Router) {
+			r.Get("/accounts/{code}/balance", ledgerHandler.GetAccountBalance)
 		})
 	})
 
