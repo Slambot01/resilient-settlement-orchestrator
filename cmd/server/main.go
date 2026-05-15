@@ -92,11 +92,18 @@ func main() {
 
 	paymentService := service.NewPaymentService(dbPool, paymentRouter, ledgerService)
 
+	// PSP adapter registry for webhook signature verification
+	pspAdapters := map[string]adapter.PSPAdapter{
+		"mock": mockPSP,
+	}
+	webhookService := service.NewWebhookService(dbPool, ledgerService, pspAdapters)
+
 	// ── Initialize Handlers ─────────────────────────────────────────
 	
 	healthHandler := handler.NewHealthHandler(cfg)
 	paymentHandler := handler.NewPaymentHandler(paymentService)
 	ledgerHandler := handler.NewLedgerHandler(ledgerService)
+	webhookHandler := handler.NewWebhookHandler(webhookService)
 
 	// ── Create router ───────────────────────────────────────────────
 	r := chi.NewRouter()
@@ -127,6 +134,8 @@ func main() {
 		r.Route("/ledger", func(r chi.Router) {
 			r.Get("/accounts/{code}/balance", ledgerHandler.GetAccountBalance)
 		})
+
+		r.Post("/webhooks/{psp}", webhookHandler.HandleWebhook)
 	})
 
 	// ── Start server with graceful shutdown ──────────────────────────

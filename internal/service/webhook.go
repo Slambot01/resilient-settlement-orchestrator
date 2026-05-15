@@ -1,0 +1,443 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Slambot01/resilient-settlement-orchestrator/internal/adapter"
+	"github.com/Slambot01/resilient-settlement-orchestrator/internal/models"
+)
+
+type WebhookService struct {
+	db       *pgxpool.Pool
+	ledger   *LedgerService
+	adapters map[string]adapter.PSPAdapter
+}
+
+func NewWebhookService(db *pgxpool.Pool, ledger *LedgerService, adapters map[string]adapter.PSPAdapter) *WebhookService {
+	return &WebhookService{
+		db:       db,
+		ledger:   ledger,
+		adapters: adapters,
+	}
+}
+
+// IngestWebhook validates, deduplicates, and processes an incoming webhook.
+// Returns nil if the event was already processed (idempotent).
+func (s *WebhookService) IngestWebhook(ctx context.Context, psp, eventType string, payload []byte, signature string) error {
+	// 1. Verify signature
+	pspAdapter, ok := s.adapters[psp]
+	if !ok {
+		return fmt.Errorf("unknown psp: %s", psp)
+	}
+
+	if err := pspAdapter.VerifyWebhookSignature(payload, signature); err != nil {
+		return fmt.Errorf("signature verification failed: %w", err)
+	}
+
+	// 2. Build idempotency key from PSP + raw payload hash
+	idempotencyKey := fmt.Sprintf("%s:%s:%s", psp, eventType, uuid.NewSHA1(uuid.NameSpaceDNS, payload).String())
+
+	// 3. Check for duplicate (idempotent insert)
+	var existingID string
+	err := s.db.QueryRow(ctx,
+		`SELECT id FROM webhook_events WHERE idempotency_key = $1`, idempotencyKey,
+	).Scan(&existingID)
+
+	if err == nil {
+		slog.Info("webhook already processed, skipping", slog.String("idempotency_key", idempotencyKey))
+		return nil
+	}
+	if err != pgx.ErrNoRows {
+		return fmt.Errorf("checking duplicate webhook: %w", err)
+	}
+
+	// 4. Extract PSP payment ID from payload
+	pspPaymentID := extractPSPPaymentID(psp, payload)
+
+	// 5. Look up internal payment by PSP reference
+	var internalPaymentID string
+	err = s.db.QueryRow(ctx,
+		`SELECT id FROM payments WHERE psp = $1 AND psp_payment_id = $2`, psp, pspPaymentID,
+	).Scan(&internalPaymentID)
+
+	if err == pgx.ErrNoRows {
+		slog.Warn("no matching internal payment for webhook",
+			slog.String("psp", psp),
+			slog.String("psp_payment_id", pspPaymentID),
+		)
+	}
+
+	// 6. Insert webhook record
+	webhookID := uuid.NewString()
+	now := time.Now().UTC()
+
+	_, err = s.db.Exec(ctx, `
+		INSERT INTO webhook_events (id, psp, event_type, raw_payload, signature, psp_payment_id, internal_payment_id, status, idempotency_key, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+	`, webhookID, psp, eventType, string(payload), signature, pspPaymentID, nilIfEmpty(internalPaymentID), models.WebhookStatusProcessing, idempotencyKey, now)
+	if err != nil {
+		return fmt.Errorf("inserting webhook event: %w", err)
+	}
+
+	// 7. Process based on event type
+	var processErr error
+	switch eventType {
+	case "payment.captured", "payment_intent.succeeded":
+		processErr = s.processCaptureWebhook(ctx, internalPaymentID, pspPaymentID)
+	case "payment.failed", "payment_intent.payment_failed":
+		processErr = s.processFailureWebhook(ctx, internalPaymentID)
+	case "refund.created", "refund.processed":
+		processErr = s.processRefundWebhook(ctx, internalPaymentID, payload)
+	default:
+		slog.Info("unhandled webhook event type", slog.String("type", eventType))
+	}
+
+	// 8. Update webhook status
+	finalStatus := models.WebhookStatusProcessed
+	var errMsg string
+	if processErr != nil {
+		finalStatus = models.WebhookStatusFailed
+		errMsg = processErr.Error()
+	}
+
+	_, err = s.db.Exec(ctx, `
+		UPDATE webhook_events SET status = $1, error_message = $2, processed_at = $3 WHERE id = $4
+	`, finalStatus, nilIfEmpty(errMsg), now, webhookID)
+	if err != nil {
+		slog.Error("failed to update webhook status", slog.Any("error", err))
+	}
+
+	return processErr
+}
+
+// processCaptureWebhook handles a successful capture event.
+// Everything runs inside a single database transaction:
+//   - Update payment status to captured
+//   - Record state transition
+//   - Post double-entry ledger entries
+//   - Update account balances
+//
+// If any step fails, PostgreSQL rolls back the entire operation.
+// The PSP will retry the webhook on a non-200 response.
+func (s *WebhookService) processCaptureWebhook(ctx context.Context, paymentID, pspPaymentID string) error {
+	if paymentID == "" {
+		return fmt.Errorf("cannot process capture: no internal payment ID")
+	}
+
+	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	now := time.Now().UTC()
+
+	// 1. Lock the payment row and verify current status
+	var currentStatus models.PaymentStatus
+	var amount int64
+	err = tx.QueryRow(ctx,
+		`SELECT status, amount FROM payments WHERE id = $1 FOR UPDATE`, paymentID,
+	).Scan(&currentStatus, &amount)
+	if err != nil {
+		return fmt.Errorf("locking payment: %w", err)
+	}
+
+	// Allow idempotent re-processing: if already captured, succeed silently
+	if currentStatus == models.PaymentStatusCaptured {
+		return nil
+	}
+
+	if err := ValidateTransition(currentStatus, models.PaymentStatusCaptured); err != nil {
+		return fmt.Errorf("invalid state for capture: %w", err)
+	}
+
+	// 2. Update payment status
+	_, err = tx.Exec(ctx,
+		`UPDATE payments SET status = $1, updated_at = $2 WHERE id = $3`,
+		models.PaymentStatusCaptured, now, paymentID,
+	)
+	if err != nil {
+		return fmt.Errorf("updating payment status: %w", err)
+	}
+
+	// 3. Record state transition
+	_, err = tx.Exec(ctx, `
+		INSERT INTO payment_state_transitions (id, payment_id, from_status, to_status, reason, triggered_by, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, uuid.NewString(), paymentID, currentStatus, models.PaymentStatusCaptured, "Capture confirmed by PSP webhook", "webhook", now)
+	if err != nil {
+		return fmt.Errorf("recording transition: %w", err)
+	}
+
+	// 4. Post ledger entries within the same transaction
+	//    Debit: PSP_SETTLEMENT (asset increases — PSP owes us money)
+	//    Credit: MERCHANT_PAY (liability increases — we owe the merchant)
+	txID := uuid.NewString()
+	_, err = tx.Exec(ctx, `
+		INSERT INTO ledger_transactions (id, payment_id, transaction_type, status, created_at, posted_at)
+		VALUES ($1, $2, $3, $4, $5, $5)
+	`, txID, paymentID, "payment_capture", models.TxStatusPosted, now)
+	if err != nil {
+		return fmt.Errorf("inserting ledger tx: %w", err)
+	}
+
+	// Debit PSP_SETTLEMENT
+	err = s.postEntryInTx(ctx, tx, txID, models.AccPSPSettlement, amount, 0, paymentID, "Payment captured", now)
+	if err != nil {
+		return fmt.Errorf("debit entry: %w", err)
+	}
+
+	// Credit MERCHANT_PAY
+	err = s.postEntryInTx(ctx, tx, txID, models.AccMerchantPayable, 0, amount, paymentID, "Payment captured", now)
+	if err != nil {
+		return fmt.Errorf("credit entry: %w", err)
+	}
+
+	// 5. Commit — all or nothing
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit capture tx: %w", err)
+	}
+
+	slog.Info("capture webhook processed",
+		slog.String("payment_id", paymentID),
+		slog.Int64("amount", amount),
+	)
+	return nil
+}
+
+func (s *WebhookService) processFailureWebhook(ctx context.Context, paymentID string) error {
+	if paymentID == "" {
+		return nil
+	}
+
+	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	now := time.Now().UTC()
+
+	var currentStatus models.PaymentStatus
+	err = tx.QueryRow(ctx, `SELECT status FROM payments WHERE id = $1 FOR UPDATE`, paymentID).Scan(&currentStatus)
+	if err != nil {
+		return err
+	}
+
+	if currentStatus.IsTerminal() {
+		return nil
+	}
+
+	if err := ValidateTransition(currentStatus, models.PaymentStatusFailed); err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx, `UPDATE payments SET status = $1, updated_at = $2 WHERE id = $3`,
+		models.PaymentStatusFailed, now, paymentID)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO payment_state_transitions (id, payment_id, from_status, to_status, reason, triggered_by, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, uuid.NewString(), paymentID, currentStatus, models.PaymentStatusFailed, "Payment failed per PSP webhook", "webhook", now)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+func (s *WebhookService) processRefundWebhook(ctx context.Context, paymentID string, payload []byte) error {
+	if paymentID == "" {
+		return nil
+	}
+
+	// Extract refund amount from payload
+	var parsed map[string]interface{}
+	json.Unmarshal(payload, &parsed)
+
+	refundAmount := extractRefundAmount(parsed)
+	if refundAmount <= 0 {
+		return fmt.Errorf("invalid refund amount in webhook payload")
+	}
+
+	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	now := time.Now().UTC()
+
+	var currentStatus models.PaymentStatus
+	var totalAmount int64
+	err = tx.QueryRow(ctx, `SELECT status, amount FROM payments WHERE id = $1 FOR UPDATE`, paymentID).Scan(&currentStatus, &totalAmount)
+	if err != nil {
+		return err
+	}
+
+	newStatus := models.PaymentStatusRefunded
+	if refundAmount < totalAmount {
+		newStatus = models.PaymentStatusPartiallyRefunded
+	}
+
+	if err := ValidateTransition(currentStatus, newStatus); err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx, `UPDATE payments SET status = $1, updated_at = $2 WHERE id = $3`, newStatus, now, paymentID)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO payment_state_transitions (id, payment_id, from_status, to_status, reason, triggered_by, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, uuid.NewString(), paymentID, currentStatus, newStatus, "Refund confirmed by PSP webhook", "webhook", now)
+	if err != nil {
+		return err
+	}
+
+	// Reverse the original capture ledger entries
+	txID := uuid.NewString()
+	_, err = tx.Exec(ctx, `
+		INSERT INTO ledger_transactions (id, payment_id, transaction_type, status, created_at, posted_at)
+		VALUES ($1, $2, $3, $4, $5, $5)
+	`, txID, paymentID, "refund", models.TxStatusPosted, now)
+	if err != nil {
+		return err
+	}
+
+	// Debit MERCHANT_PAY (reduce liability — we owe the merchant less)
+	err = s.postEntryInTx(ctx, tx, txID, models.AccMerchantPayable, refundAmount, 0, paymentID, "Refund processed", now)
+	if err != nil {
+		return err
+	}
+
+	// Credit REFUND_EXP (expense increases)
+	err = s.postEntryInTx(ctx, tx, txID, models.AccRefundExpense, 0, refundAmount, paymentID, "Refund processed", now)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+// postEntryInTx inserts a ledger entry and updates the account balance within an existing transaction.
+// Uses SELECT FOR UPDATE to prevent balance drift under concurrency.
+func (s *WebhookService) postEntryInTx(ctx context.Context, tx pgx.Tx, txID, accountCode string, debit, credit int64, refID, desc string, now time.Time) error {
+	var accountID string
+	var currentBalance int64
+	var accType models.AccountType
+
+	err := tx.QueryRow(ctx,
+		`SELECT id, current_balance, account_type FROM ledger_accounts WHERE account_code = $1 FOR UPDATE`,
+		accountCode,
+	).Scan(&accountID, &currentBalance, &accType)
+	if err != nil {
+		return fmt.Errorf("locking account %s: %w", accountCode, err)
+	}
+
+	newBalance := currentBalance
+	switch accType {
+	case models.AccountTypeAsset, models.AccountTypeExpense:
+		newBalance += debit - credit
+	case models.AccountTypeLiability, models.AccountTypeRevenue:
+		newBalance += credit - debit
+	}
+
+	_, err = tx.Exec(ctx, `UPDATE ledger_accounts SET current_balance = $1 WHERE id = $2`, newBalance, accountID)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO ledger_entries (id, transaction_id, account_id, debit, credit, running_balance, description, reference_id, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	`, uuid.NewString(), txID, accountID, debit, credit, newBalance, desc, refID, now)
+
+	return err
+}
+
+// extractPSPPaymentID pulls the payment identifier from a raw webhook payload.
+func extractPSPPaymentID(psp string, payload []byte) string {
+	var data map[string]interface{}
+	if err := json.Unmarshal(payload, &data); err != nil {
+		return ""
+	}
+
+	switch psp {
+	case "stripe":
+		// Stripe: data.object.id
+		if obj, ok := data["data"].(map[string]interface{}); ok {
+			if inner, ok := obj["object"].(map[string]interface{}); ok {
+				if id, ok := inner["id"].(string); ok {
+					return id
+				}
+			}
+		}
+	case "razorpay":
+		// Razorpay: payload.payment.entity.id
+		if p, ok := data["payload"].(map[string]interface{}); ok {
+			if payment, ok := p["payment"].(map[string]interface{}); ok {
+				if entity, ok := payment["entity"].(map[string]interface{}); ok {
+					if id, ok := entity["id"].(string); ok {
+						return id
+					}
+				}
+			}
+		}
+	case "mock":
+		if id, ok := data["payment_id"].(string); ok {
+			return id
+		}
+	}
+
+	return ""
+}
+
+func extractRefundAmount(data map[string]interface{}) int64 {
+	// Try Stripe format
+	if obj, ok := data["data"].(map[string]interface{}); ok {
+		if inner, ok := obj["object"].(map[string]interface{}); ok {
+			if amount, ok := inner["amount"].(float64); ok {
+				return int64(amount)
+			}
+		}
+	}
+
+	// Try Razorpay format
+	if p, ok := data["payload"].(map[string]interface{}); ok {
+		if refund, ok := p["refund"].(map[string]interface{}); ok {
+			if entity, ok := refund["entity"].(map[string]interface{}); ok {
+				if amount, ok := entity["amount"].(float64); ok {
+					return int64(amount)
+				}
+			}
+		}
+	}
+
+	// Try flat format (mock)
+	if amount, ok := data["amount"].(float64); ok {
+		return int64(amount)
+	}
+
+	return 0
+}
+
+func nilIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
