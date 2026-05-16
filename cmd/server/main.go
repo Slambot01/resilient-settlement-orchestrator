@@ -129,6 +129,7 @@ func main() {
 		})
 		
 		r.Route("/payments", func(r chi.Router) {
+			r.Use(middleware.Idempotency(redisClient))
 			r.Post("/", paymentHandler.CreatePayment)
 			r.Get("/{id}", paymentHandler.GetPayment)
 		})
