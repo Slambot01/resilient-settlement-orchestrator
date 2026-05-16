@@ -3,76 +3,135 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/adapter"
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/models"
+	"github.com/Slambot01/resilient-settlement-orchestrator/internal/pkg/circuitbreaker"
 )
 
 type PaymentRouter struct {
 	adapters map[models.PSPName]adapter.PSPAdapter
+	breakers map[models.PSPName]*circuitbreaker.CircuitBreaker
 	rules    []models.RoutingRule
 }
 
 func NewPaymentRouter() *PaymentRouter {
 	return &PaymentRouter{
 		adapters: make(map[models.PSPName]adapter.PSPAdapter),
+		breakers: make(map[models.PSPName]*circuitbreaker.CircuitBreaker),
 		rules:    []models.RoutingRule{},
 	}
 }
 
-// RegisterAdapter adds a PSP adapter to the router.
 func (r *PaymentRouter) RegisterAdapter(name models.PSPName, a adapter.PSPAdapter) {
 	r.adapters[name] = a
+	r.breakers[name] = circuitbreaker.New(string(name), circuitbreaker.DefaultConfig())
 }
 
-// LoadRules loads the routing configuration. In production, this might come from a DB or ConfigMap.
 func (r *PaymentRouter) LoadRules(rules []models.RoutingRule) {
 	r.rules = rules
 }
 
-// Route selects the best PSP for a given payment based on defined rules.
+// RecordSuccess signals a successful PSP call to the circuit breaker.
+func (r *PaymentRouter) RecordSuccess(psp models.PSPName) {
+	if cb, ok := r.breakers[psp]; ok {
+		cb.RecordSuccess()
+	}
+}
+
+// RecordFailure signals a failed PSP call to the circuit breaker.
+func (r *PaymentRouter) RecordFailure(psp models.PSPName) {
+	if cb, ok := r.breakers[psp]; ok {
+		cb.RecordFailure()
+	}
+}
+
+// GetBreakerStats returns circuit breaker stats for all PSPs.
+func (r *PaymentRouter) GetBreakerStats() map[string]circuitbreaker.Stats {
+	stats := make(map[string]circuitbreaker.Stats)
+	for name, cb := range r.breakers {
+		stats[string(name)] = cb.Stats()
+	}
+	return stats
+}
+
+// Route selects the best PSP, respecting circuit breaker state.
+// If the primary PSP's breaker is open, it falls back automatically.
 func (r *PaymentRouter) Route(ctx context.Context, req models.CreatePaymentRequest) (*models.RoutingDecision, adapter.PSPAdapter, error) {
-	// 1. Check if the merchant explicitly preferred a PSP
+	// Explicit merchant preference (bypass rules, but still check breaker)
 	if req.RoutingPreferences != nil && req.RoutingPreferences.PreferredPSP != "" {
 		pref := models.PSPName(req.RoutingPreferences.PreferredPSP)
 		if adp, ok := r.adapters[pref]; ok {
-			return &models.RoutingDecision{
-				SelectedPSP: pref,
-				Reason:      "merchant_preference",
-				RuleName:    "explicit_override",
-			}, adp, nil
+			if r.isAvailable(pref) {
+				return &models.RoutingDecision{
+					SelectedPSP: pref,
+					Reason:      "merchant_preference",
+					RuleName:    "explicit_override",
+				}, adp, nil
+			}
+			slog.Warn("preferred PSP circuit is open, falling through to rules",
+				slog.String("psp", string(pref)),
+			)
 		}
 	}
 
-	// 2. Evaluate rules in order of priority
+	// Evaluate rules — check primary first, then fallback
 	for _, rule := range r.rules {
-		if r.matches(rule.Conditions, req) {
-			// In a full implementation, we'd check Circuit Breaker state here.
-			// If primary is OPEN, we fall back to FallbackPSP.
-			// For now, we assume primary is healthy.
+		if !r.matches(rule.Conditions, req) {
+			continue
+		}
+
+		// Try primary PSP
+		if r.isAvailable(rule.PrimaryPSP) {
 			if adp, ok := r.adapters[rule.PrimaryPSP]; ok {
 				return &models.RoutingDecision{
 					SelectedPSP: rule.PrimaryPSP,
+					FallbackPSP: rule.FallbackPSP,
 					Reason:      "rule_match",
+					RuleName:    rule.Name,
+				}, adp, nil
+			}
+		}
+
+		// Primary is down — try fallback
+		if rule.FallbackPSP != "" && r.isAvailable(rule.FallbackPSP) {
+			if adp, ok := r.adapters[rule.FallbackPSP]; ok {
+				slog.Warn("primary PSP circuit open, using fallback",
+					slog.String("primary", string(rule.PrimaryPSP)),
+					slog.String("fallback", string(rule.FallbackPSP)),
+				)
+				return &models.RoutingDecision{
+					SelectedPSP: rule.FallbackPSP,
+					Reason:      "circuit_breaker_fallback",
 					RuleName:    rule.Name,
 				}, adp, nil
 			}
 		}
 	}
 
-	// 3. Fallback to default (Mock for testing, or fail)
-	if adp, ok := r.adapters[models.PSPMock]; ok {
-		return &models.RoutingDecision{
-			SelectedPSP: models.PSPMock,
-			Reason:      "default_fallback",
-			RuleName:    "no_rule_matched",
-		}, adp, nil
+	// Last resort — any available adapter
+	for name, adp := range r.adapters {
+		if r.isAvailable(name) {
+			return &models.RoutingDecision{
+				SelectedPSP: name,
+				Reason:      "last_resort_fallback",
+				RuleName:    "no_rule_matched",
+			}, adp, nil
+		}
 	}
 
-	return nil, nil, fmt.Errorf("no suitable PSP found for payment")
+	return nil, nil, fmt.Errorf("all PSPs are unavailable")
 }
 
-// matches evaluates if a payment request matches a set of routing conditions.
+func (r *PaymentRouter) isAvailable(psp models.PSPName) bool {
+	cb, ok := r.breakers[psp]
+	if !ok {
+		return true
+	}
+	return cb.Allow()
+}
+
 func (r *PaymentRouter) matches(cond models.RoutingConditions, req models.CreatePaymentRequest) bool {
 	if cond.MinAmount != nil && req.Amount < *cond.MinAmount {
 		return false
@@ -83,7 +142,5 @@ func (r *PaymentRouter) matches(cond models.RoutingConditions, req models.Create
 	if cond.Currency != "" && req.Currency != cond.Currency {
 		return false
 	}
-	// Note: We'd extract Country from req.PaymentMethodDetails, etc.
-	// Simplifying for the scaffolding.
 	return true
 }

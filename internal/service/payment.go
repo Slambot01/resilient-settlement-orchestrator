@@ -81,8 +81,15 @@ func (s *PaymentService) CreatePayment(ctx context.Context, req models.CreatePay
 
 	pspRes, pspErr := pspAdapter.CreatePayment(ctx, pspReq)
 
+	// Record outcome on the circuit breaker
+	if pspErr != nil {
+		s.router.RecordFailure(decision.SelectedPSP)
+	} else {
+		s.router.RecordSuccess(decision.SelectedPSP)
+	}
+
 	// 4. Update status based on PSP response
-	finalStatus := models.PaymentStatusAuthorized // assuming authorization success
+	finalStatus := models.PaymentStatusAuthorized
 	var pspPaymentID string
 	var reason string
 
@@ -94,7 +101,6 @@ func (s *PaymentService) CreatePayment(ctx context.Context, req models.CreatePay
 		reason = "PSP authorization successful"
 	}
 
-	// Update DB with final state
 	err = s.updatePaymentState(ctx, paymentID, models.PaymentStatusCreated, finalStatus, pspPaymentID, reason, "system")
 	if err != nil {
 		return nil, fmt.Errorf("updating final state: %w", err)
