@@ -97,6 +97,7 @@ func main() {
 		"mock": mockPSP,
 	}
 	webhookService := service.NewWebhookService(dbPool, ledgerService, pspAdapters)
+	reconService := service.NewReconciliationService(dbPool, pspAdapters)
 
 	// ── Initialize Handlers ─────────────────────────────────────────
 	
@@ -104,6 +105,7 @@ func main() {
 	paymentHandler := handler.NewPaymentHandler(paymentService)
 	ledgerHandler := handler.NewLedgerHandler(ledgerService)
 	webhookHandler := handler.NewWebhookHandler(webhookService)
+	reconHandler := handler.NewReconciliationHandler(reconService)
 
 	// ── Create router ───────────────────────────────────────────────
 	r := chi.NewRouter()
@@ -136,6 +138,11 @@ func main() {
 		})
 
 		r.Post("/webhooks/{psp}", webhookHandler.HandleWebhook)
+
+		r.Route("/reconciliation", func(r chi.Router) {
+			r.Post("/{psp}", reconHandler.TriggerReconciliation)
+			r.Get("/{id}/discrepancies", reconHandler.GetDiscrepancies)
+		})
 	})
 
 	// ── Start server with graceful shutdown ──────────────────────────
