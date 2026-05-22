@@ -11,6 +11,7 @@ import (
 
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/adapter"
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/models"
+	"github.com/Slambot01/resilient-settlement-orchestrator/internal/pkg/retry"
 )
 
 type PaymentService struct {
@@ -70,7 +71,7 @@ func (s *PaymentService) CreatePayment(ctx context.Context, req models.CreatePay
 		return nil, fmt.Errorf("commit tx: %w", err)
 	}
 
-	// 3. Call the PSP Adapter
+	// 3. Call the PSP Adapter with retry
 	pspReq := adapter.PSPPaymentRequest{
 		Amount:        req.Amount,
 		Currency:      req.Currency,
@@ -79,9 +80,20 @@ func (s *PaymentService) CreatePayment(ctx context.Context, req models.CreatePay
 		CustomerEmail: req.CustomerEmail,
 	}
 
-	pspRes, pspErr := pspAdapter.CreatePayment(ctx, pspReq)
+	var pspRes *adapter.PSPPaymentResponse
+	var pspErr error
 
-	// Record outcome on the circuit breaker
+	retryCfg := retry.DefaultConfig()
+	pspErr = retry.Do(ctx, retryCfg, "psp_create_payment", func(ctx context.Context) error {
+		res, err := pspAdapter.CreatePayment(ctx, pspReq)
+		if err != nil {
+			return err
+		}
+		pspRes = res
+		return nil
+	})
+
+	// Record final outcome on the circuit breaker (after all retries)
 	if pspErr != nil {
 		s.router.RecordFailure(decision.SelectedPSP)
 	} else {
