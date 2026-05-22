@@ -98,6 +98,7 @@ func main() {
 	}
 	webhookService := service.NewWebhookService(dbPool, ledgerService, pspAdapters)
 	reconService := service.NewReconciliationService(dbPool, pspAdapters)
+	dlqService := service.NewDLQService(redisClient, webhookService)
 
 	// ── Initialize Handlers ─────────────────────────────────────────
 	
@@ -106,6 +107,7 @@ func main() {
 	ledgerHandler := handler.NewLedgerHandler(ledgerService)
 	webhookHandler := handler.NewWebhookHandler(webhookService)
 	reconHandler := handler.NewReconciliationHandler(reconService)
+	dlqHandler := handler.NewDLQHandler(dlqService)
 
 	// ── Create router ───────────────────────────────────────────────
 	r := chi.NewRouter()
@@ -143,6 +145,12 @@ func main() {
 		r.Route("/reconciliation", func(r chi.Router) {
 			r.Post("/{psp}", reconHandler.TriggerReconciliation)
 			r.Get("/{id}/discrepancies", reconHandler.GetDiscrepancies)
+		})
+
+		r.Route("/dlq", func(r chi.Router) {
+			r.Get("/", dlqHandler.ListEntries)
+			r.Post("/retry", dlqHandler.RetryEntry)
+			r.Delete("/", dlqHandler.PurgeQueue)
 		})
 	})
 
