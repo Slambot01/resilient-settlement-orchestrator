@@ -99,6 +99,7 @@ func main() {
 	webhookService := service.NewWebhookService(dbPool, ledgerService, pspAdapters)
 	reconService := service.NewReconciliationService(dbPool, pspAdapters)
 	dlqService := service.NewDLQService(redisClient, webhookService)
+	dashboardService := service.NewDashboardService(dbPool, paymentRouter)
 
 	// ── Initialize Handlers ─────────────────────────────────────────
 	
@@ -108,6 +109,7 @@ func main() {
 	webhookHandler := handler.NewWebhookHandler(webhookService)
 	reconHandler := handler.NewReconciliationHandler(reconService)
 	dlqHandler := handler.NewDLQHandler(dlqService)
+	dashboardHandler := handler.NewDashboardHandler(dashboardService)
 
 	// ── Create router ───────────────────────────────────────────────
 	r := chi.NewRouter()
@@ -155,6 +157,11 @@ func main() {
 				r.Get("/", dlqHandler.ListEntries)
 				r.Post("/retry", dlqHandler.RetryEntry)
 				r.Delete("/", dlqHandler.PurgeQueue)
+			})
+
+			r.Route("/dashboard", func(r chi.Router) {
+				r.Get("/stats", dashboardHandler.GetStats)
+				r.Get("/volume", dashboardHandler.GetDailyVolume)
 			})
 		})
 	})
