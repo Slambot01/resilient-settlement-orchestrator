@@ -142,15 +142,20 @@ func main() {
 
 		r.Post("/webhooks/{psp}", webhookHandler.HandleWebhook)
 
-		r.Route("/reconciliation", func(r chi.Router) {
-			r.Post("/{psp}", reconHandler.TriggerReconciliation)
-			r.Get("/{id}/discrepancies", reconHandler.GetDiscrepancies)
-		})
+		// Admin routes — protected by API key
+		r.Route("/admin", func(r chi.Router) {
+			r.Use(middleware.APIKeyAuth(cfg.Auth.APIKeys))
 
-		r.Route("/dlq", func(r chi.Router) {
-			r.Get("/", dlqHandler.ListEntries)
-			r.Post("/retry", dlqHandler.RetryEntry)
-			r.Delete("/", dlqHandler.PurgeQueue)
+			r.Route("/reconciliation", func(r chi.Router) {
+				r.Post("/{psp}", reconHandler.TriggerReconciliation)
+				r.Get("/{id}/discrepancies", reconHandler.GetDiscrepancies)
+			})
+
+			r.Route("/dlq", func(r chi.Router) {
+				r.Get("/", dlqHandler.ListEntries)
+				r.Post("/retry", dlqHandler.RetryEntry)
+				r.Delete("/", dlqHandler.PurgeQueue)
+			})
 		})
 	})
 

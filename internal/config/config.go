@@ -12,6 +12,7 @@ type Config struct {
 	Database DatabaseConfig
 	Redis    RedisConfig
 	Log      LogConfig
+	Auth     AuthConfig
 }
 
 // ServerConfig holds HTTP server settings.
@@ -44,6 +45,11 @@ type RedisConfig struct {
 type LogConfig struct {
 	Level  string
 	Format string
+}
+
+// AuthConfig holds API key authentication settings.
+type AuthConfig struct {
+	APIKeys []string
 }
 
 // DSN returns the PostgreSQL connection string.
@@ -81,6 +87,9 @@ func Load() *Config {
 			Level:  getEnv("LOG_LEVEL", "debug"),
 			Format: getEnv("LOG_FORMAT", "json"),
 		},
+		Auth: AuthConfig{
+			APIKeys: getEnvSlice("API_KEYS"),
+		},
 	}
 }
 
@@ -98,4 +107,42 @@ func getEnvInt(key string, fallback int) int {
 		}
 	}
 	return fallback
+}
+
+func getEnvSlice(key string) []string {
+	value, ok := os.LookupEnv(key)
+	if !ok || value == "" {
+		return nil
+	}
+	var result []string
+	for _, k := range splitComma(value) {
+		k = trimSpace(k)
+		if k != "" {
+			result = append(result, k)
+		}
+	}
+	return result
+}
+
+func splitComma(s string) []string {
+	result := []string{}
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == ',' {
+			result = append(result, s[start:i])
+			start = i + 1
+		}
+	}
+	result = append(result, s[start:])
+	return result
+}
+
+func trimSpace(s string) string {
+	for len(s) > 0 && s[0] == ' ' {
+		s = s[1:]
+	}
+	for len(s) > 0 && s[len(s)-1] == ' ' {
+		s = s[:len(s)-1]
+	}
+	return s
 }
