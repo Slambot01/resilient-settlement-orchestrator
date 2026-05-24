@@ -163,6 +163,8 @@ func main() {
 				r.Get("/stats", dashboardHandler.GetStats)
 				r.Get("/volume", dashboardHandler.GetDailyVolume)
 				r.Get("/psp-health", dashboardHandler.GetPSPHealth)
+				r.Get("/payments", dashboardHandler.GetRecentPayments)
+				r.Get("/activity", dashboardHandler.GetActivityFeed)
 			})
 		})
 	})

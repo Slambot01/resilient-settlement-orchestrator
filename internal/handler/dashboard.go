@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/pkg/response"
@@ -76,5 +77,46 @@ func (h *DashboardHandler) GetPSPHealth(w http.ResponseWriter, r *http.Request) 
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"providers": health,
+	})
+}
+
+// GetRecentPayments handles GET /v1/admin/dashboard/payments?offset=0&limit=20
+func (h *DashboardHandler) GetRecentPayments(w http.ResponseWriter, r *http.Request) {
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+
+	payments, total, err := h.svc.GetRecentPayments(r.Context(), offset, limit)
+	if err != nil {
+		response.ErrorWithDetails(w, http.StatusInternalServerError, "PAYMENTS_ERROR", "failed to fetch recent payments", err.Error())
+		return
+	}
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"payments": payments,
+		"total":    total,
+		"offset":   offset,
+		"limit":    limit,
+	})
+}
+
+// GetActivityFeed handles GET /v1/admin/dashboard/activity?limit=50
+func (h *DashboardHandler) GetActivityFeed(w http.ResponseWriter, r *http.Request) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+
+	events, err := h.svc.GetActivityFeed(r.Context(), limit)
+	if err != nil {
+		response.ErrorWithDetails(w, http.StatusInternalServerError, "ACTIVITY_ERROR", "failed to fetch activity feed", err.Error())
+		return
+	}
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"events": events,
 	})
 }

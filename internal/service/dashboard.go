@@ -279,3 +279,96 @@ func (s *DashboardService) GetPSPHealth(ctx context.Context) ([]PSPHealth, error
 
 	return result, nil
 }
+
+// RecentPayment is a compact payment summary for listing.
+type RecentPayment struct {
+	ID            string    `json:"id"`
+	MerchantID    string    `json:"merchant_id"`
+	OrderID       string    `json:"order_id"`
+	Amount        int64     `json:"amount"`
+	Currency      string    `json:"currency"`
+	Status        string    `json:"status"`
+	PSP           string    `json:"psp"`
+	CustomerEmail *string   `json:"customer_email,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+// GetRecentPayments returns paginated payment records ordered by most recent.
+func (s *DashboardService) GetRecentPayments(ctx context.Context, offset, limit int) ([]RecentPayment, int64, error) {
+	var total int64
+	err := s.db.QueryRow(ctx, `SELECT COUNT(*) FROM payments`).Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("counting payments: %w", err)
+	}
+
+	rows, err := s.db.Query(ctx, `
+		SELECT id, merchant_id, order_id, amount, currency, status, psp, customer_email, created_at
+		FROM payments
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2
+	`, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("querying recent payments: %w", err)
+	}
+	defer rows.Close()
+
+	var result []RecentPayment
+	for rows.Next() {
+		var p RecentPayment
+		if err := rows.Scan(&p.ID, &p.MerchantID, &p.OrderID, &p.Amount, &p.Currency, &p.Status, &p.PSP, &p.CustomerEmail, &p.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		result = append(result, p)
+	}
+
+	return result, total, nil
+}
+
+// ActivityEvent represents a single event in the activity feed.
+type ActivityEvent struct {
+	Timestamp   time.Time `json:"timestamp"`
+	EventType   string    `json:"event_type"`
+	PaymentID   string    `json:"payment_id,omitempty"`
+	Description string    `json:"description"`
+	Actor       string    `json:"actor"`
+}
+
+// GetActivityFeed returns a combined feed of state transitions and webhook events.
+func (s *DashboardService) GetActivityFeed(ctx context.Context, limit int) ([]ActivityEvent, error) {
+	rows, err := s.db.Query(ctx, `
+		(
+			SELECT created_at, 'state_transition' as event_type, payment_id,
+				CONCAT(from_status, ' → ', to_status, ': ', reason) as description,
+				triggered_by as actor
+			FROM payment_state_transitions
+			ORDER BY created_at DESC
+			LIMIT $1
+		)
+		UNION ALL
+		(
+			SELECT created_at, 'webhook' as event_type, COALESCE(internal_payment_id, '') as payment_id,
+				CONCAT(psp, '/', event_type, ' [', status, ']') as description,
+				psp as actor
+			FROM webhook_events
+			ORDER BY created_at DESC
+			LIMIT $1
+		)
+		ORDER BY timestamp DESC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("querying activity feed: %w", err)
+	}
+	defer rows.Close()
+
+	var result []ActivityEvent
+	for rows.Next() {
+		var e ActivityEvent
+		if err := rows.Scan(&e.Timestamp, &e.EventType, &e.PaymentID, &e.Description, &e.Actor); err != nil {
+			return nil, err
+		}
+		result = append(result, e)
+	}
+
+	return result, nil
+}
