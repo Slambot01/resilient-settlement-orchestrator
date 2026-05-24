@@ -188,3 +188,94 @@ func (s *DashboardService) GetDailyVolume(ctx context.Context, from, to time.Tim
 
 	return result, nil
 }
+
+// PSPHealth combines circuit breaker state with historical performance metrics.
+type PSPHealth struct {
+	PSP              string  `json:"psp"`
+	CircuitState     string  `json:"circuit_state"`
+	TotalRequests    int64   `json:"total_requests"`
+	TotalFailures    int64   `json:"total_failures"`
+	ConsecutiveFails int     `json:"consecutive_failures"`
+	SuccessRate      float64 `json:"success_rate"`
+	DBTotalPayments  int     `json:"db_total_payments"`
+	DBCapturedCount  int     `json:"db_captured_count"`
+	DBFailedCount    int     `json:"db_failed_count"`
+	DBSuccessRate    float64 `json:"db_success_rate"`
+}
+
+// GetPSPHealth returns circuit breaker state and DB-backed success metrics per PSP.
+func (s *DashboardService) GetPSPHealth(ctx context.Context) ([]PSPHealth, error) {
+	breakerStats := s.router.GetBreakerStats()
+
+	// Query DB for per-PSP payment outcomes
+	rows, err := s.db.Query(ctx, `
+		SELECT psp,
+			COUNT(*) as total,
+			COUNT(*) FILTER (WHERE status = 'captured') as captured,
+			COUNT(*) FILTER (WHERE status = 'failed') as failed
+		FROM payments
+		GROUP BY psp
+		ORDER BY psp ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("querying PSP metrics: %w", err)
+	}
+	defer rows.Close()
+
+	dbMetrics := make(map[string][3]int) // [total, captured, failed]
+	for rows.Next() {
+		var psp string
+		var total, captured, failed int
+		if err := rows.Scan(&psp, &total, &captured, &failed); err != nil {
+			return nil, err
+		}
+		dbMetrics[psp] = [3]int{total, captured, failed}
+	}
+
+	// Merge circuit breaker stats with DB metrics
+	seen := make(map[string]bool)
+	var result []PSPHealth
+
+	for psp, bs := range breakerStats {
+		h := PSPHealth{
+			PSP:              psp,
+			CircuitState:     string(bs.State),
+			TotalRequests:    bs.TotalRequests,
+			TotalFailures:    bs.TotalFailures,
+			ConsecutiveFails: bs.ConsecutiveFails,
+			SuccessRate:      bs.SuccessRate * 100,
+		}
+
+		if m, ok := dbMetrics[psp]; ok {
+			h.DBTotalPayments = m[0]
+			h.DBCapturedCount = m[1]
+			h.DBFailedCount = m[2]
+			if m[0] > 0 {
+				h.DBSuccessRate = float64(m[1]) / float64(m[0]) * 100
+			}
+		}
+
+		result = append(result, h)
+		seen[psp] = true
+	}
+
+	// Include PSPs that have DB records but no circuit breaker (shouldn't happen, but defensive)
+	for psp, m := range dbMetrics {
+		if seen[psp] {
+			continue
+		}
+		h := PSPHealth{
+			PSP:             psp,
+			CircuitState:    "unknown",
+			DBTotalPayments: m[0],
+			DBCapturedCount: m[1],
+			DBFailedCount:   m[2],
+		}
+		if m[0] > 0 {
+			h.DBSuccessRate = float64(m[1]) / float64(m[0]) * 100
+		}
+		result = append(result, h)
+	}
+
+	return result, nil
+}

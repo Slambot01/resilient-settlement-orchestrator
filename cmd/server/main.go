@@ -162,6 +162,7 @@ func main() {
 			r.Route("/dashboard", func(r chi.Router) {
 				r.Get("/stats", dashboardHandler.GetStats)
 				r.Get("/volume", dashboardHandler.GetDailyVolume)
+				r.Get("/psp-health", dashboardHandler.GetPSPHealth)
 			})
 		})
 	})

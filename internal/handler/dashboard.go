@@ -65,3 +65,16 @@ func parseDateRange(r *http.Request) (time.Time, time.Time) {
 
 	return from, to
 }
+
+// GetPSPHealth handles GET /v1/admin/dashboard/psp-health
+func (h *DashboardHandler) GetPSPHealth(w http.ResponseWriter, r *http.Request) {
+	health, err := h.svc.GetPSPHealth(r.Context())
+	if err != nil {
+		response.ErrorWithDetails(w, http.StatusInternalServerError, "PSP_HEALTH_ERROR", "failed to fetch PSP health", err.Error())
+		return
+	}
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"providers": health,
+	})
+}
