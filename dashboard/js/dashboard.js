@@ -188,12 +188,47 @@
     }
 
     // ── Payments Page ───────────────────────────────────────────
+    let allPayments = [];
+    let filteredPayments = [];
+    let searchQuery = '';
+    let statusFilterValue = '';
+
     async function loadPayments() {
-        const data = await apiFetch(`/payments?offset=${paymentsOffset}&limit=${paymentsLimit}`);
+        const data = await apiFetch(`/payments?offset=${paymentsOffset}&limit=200`);
         if (!data) return;
 
+        allPayments = data.payments || [];
+        applyFilters();
+    }
+
+    function applyFilters() {
+        filteredPayments = allPayments.filter(p => {
+            // Status filter
+            if (statusFilterValue && p.status !== statusFilterValue) return false;
+
+            // Search filter
+            if (searchQuery) {
+                const q = searchQuery.toLowerCase();
+                const searchable = [
+                    p.id, p.order_id, p.merchant_id, p.psp,
+                    p.customer_email || '', p.currency
+                ].join(' ').toLowerCase();
+                if (!searchable.includes(q)) return false;
+            }
+
+            return true;
+        });
+
+        renderPaymentsTable();
+    }
+
+    function renderPaymentsTable() {
+        const start = paymentsOffset;
+        const end = start + paymentsLimit;
+        const page = filteredPayments.slice(start, end);
+
         const tbody = document.getElementById('paymentsBody');
-        tbody.innerHTML = (data.payments || []).map(p => `
+        tbody.innerHTML = page.map(p => `
             <tr>
                 <td class="id-cell">${p.id.slice(0, 8)}…</td>
                 <td>${p.order_id}</td>
@@ -203,9 +238,9 @@
                 <td>${p.psp}</td>
                 <td>${formatTime(p.created_at)}</td>
             </tr>
-        `).join('') || '<tr><td colspan="7" style="text-align:center;color:#64748b;padding:40px">No payments found</td></tr>';
+        `).join('') || '<tr><td colspan="7" style="text-align:center;color:#64748b;padding:40px">No payments match your filters</td></tr>';
 
-        renderPagination(data.total, data.offset, data.limit);
+        renderPagination(filteredPayments.length, paymentsOffset, paymentsLimit);
     }
 
     function renderPagination(total, offset, limit) {
@@ -215,13 +250,34 @@
 
         container.innerHTML = `
             <button ${offset === 0 ? 'disabled' : ''} onclick="window.__prevPage()">← Prev</button>
-            <span class="page-info">${currentPageNum} / ${totalPages || 1}</span>
+            <span class="page-info">${currentPageNum} / ${totalPages || 1} (${total})</span>
             <button ${offset + limit >= total ? 'disabled' : ''} onclick="window.__nextPage()">Next →</button>
         `;
     }
 
-    window.__prevPage = () => { paymentsOffset = Math.max(0, paymentsOffset - paymentsLimit); loadPayments(); };
-    window.__nextPage = () => { paymentsOffset += paymentsLimit; loadPayments(); };
+    window.__prevPage = () => { paymentsOffset = Math.max(0, paymentsOffset - paymentsLimit); renderPaymentsTable(); };
+    window.__nextPage = () => { paymentsOffset += paymentsLimit; renderPaymentsTable(); };
+
+    // Debounced search
+    function debounce(fn, delay) {
+        let timer;
+        return function (...args) {
+            clearTimeout(timer);
+            timer = setTimeout(() => fn.apply(this, args), delay);
+        };
+    }
+
+    document.getElementById('paymentSearch').addEventListener('input', debounce((e) => {
+        searchQuery = e.target.value.trim();
+        paymentsOffset = 0;
+        applyFilters();
+    }, 300));
+
+    document.getElementById('statusFilter').addEventListener('change', (e) => {
+        statusFilterValue = e.target.value;
+        paymentsOffset = 0;
+        applyFilters();
+    });
 
     // ── Ledger Page ─────────────────────────────────────────────
     async function loadLedger() {

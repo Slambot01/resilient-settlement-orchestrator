@@ -133,7 +133,22 @@
                 <div class="card">
                     <div class="card-header">
                         <h3>Recent Payments</h3>
-                        <div class="pagination" id="paymentsPagination"></div>
+                        <div class="filter-controls">
+                            <div class="search-box">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                <input type="text" id="paymentSearch" placeholder="Search by ID, order, or email..." autocomplete="off">
+                            </div>
+                            <select id="statusFilter" class="filter-select">
+                                <option value="">All Statuses</option>
+                                <option value="created">Created</option>
+                                <option value="authorized">Authorized</option>
+                                <option value="captured">Captured</option>
+                                <option value="failed">Failed</option>
+                                <option value="refunded">Refunded</option>
+                                <option value="cancelled">Cancelled</option>
+                            </select>
+                            <div class="pagination" id="paymentsPagination"></div>
+                        </div>
                     </div>
                     <div class="card-body table-wrapper">
                         <table class="data-table" id="paymentsTable">
