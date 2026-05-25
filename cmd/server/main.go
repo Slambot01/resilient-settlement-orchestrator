@@ -169,6 +169,13 @@ func main() {
 		})
 	})
 
+	// ── Serve Dashboard static files ────────────────────────────────
+	dashboardFS := http.FileServer(http.Dir("dashboard"))
+	r.Handle("/dashboard/*", http.StripPrefix("/dashboard", dashboardFS))
+	r.Get("/dashboard", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/dashboard/index.html", http.StatusMovedPermanently)
+	})
+
 	// ── Start server with graceful shutdown ──────────────────────────
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),

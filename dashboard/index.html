@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payment Orchestrator — Dashboard</title>
+    <meta name="description" content="Admin dashboard for the Resilient Settlement Orchestrator">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/dashboard/css/dashboard.css">
+</head>
+<body>
+    <div class="app">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-brand">
+                <div class="brand-icon">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                        <path d="M2 17l10 5 10-5"/>
+                        <path d="M2 12l10 5 10-5"/>
+                    </svg>
+                </div>
+                <span class="brand-text">Settlement<br><small>Orchestrator</small></span>
+            </div>
+
+            <nav class="sidebar-nav">
+                <a href="#" class="nav-item active" data-page="overview">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                    <span>Overview</span>
+                </a>
+                <a href="#" class="nav-item" data-page="payments">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+                    <span>Payments</span>
+                </a>
+                <a href="#" class="nav-item" data-page="ledger">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                    <span>Ledger</span>
+                </a>
+                <a href="#" class="nav-item" data-page="psp-health">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                    <span>PSP Health</span>
+                </a>
+                <a href="#" class="nav-item" data-page="activity">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                    <span>Activity</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="env-badge" id="envBadge">development</div>
+                <div class="version-text">v1.0.0</div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="top-bar">
+                <div class="top-bar-left">
+                    <button class="menu-toggle" id="menuToggle">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                    </button>
+                    <h1 class="page-title" id="pageTitle">Overview</h1>
+                </div>
+                <div class="top-bar-right">
+                    <div class="status-indicator" id="serverStatus">
+                        <span class="status-dot"></span>
+                        <span class="status-text">Connecting...</span>
+                    </div>
+                    <div class="refresh-btn" id="refreshBtn" title="Refresh data">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Overview Page -->
+            <section class="page active" id="page-overview">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-label">Total Payments</div>
+                        <div class="stat-value" id="statTotalPayments">—</div>
+                        <div class="stat-sub" id="statTodayPayments">today: —</div>
+                    </div>
+                    <div class="stat-card accent-green">
+                        <div class="stat-label">Total Revenue</div>
+                        <div class="stat-value" id="statTotalRevenue">—</div>
+                        <div class="stat-sub" id="statTodayRevenue">today: —</div>
+                    </div>
+                    <div class="stat-card accent-blue">
+                        <div class="stat-label">Success Rate</div>
+                        <div class="stat-value" id="statSuccessRate">—</div>
+                        <div class="stat-sub" id="statFailureRate">failure: —</div>
+                    </div>
+                    <div class="stat-card accent-purple">
+                        <div class="stat-label">Avg Payment</div>
+                        <div class="stat-value" id="statAvgPayment">—</div>
+                        <div class="stat-sub">&nbsp;</div>
+                    </div>
+                </div>
+
+                <div class="charts-row">
+                    <div class="card chart-card">
+                        <div class="card-header">
+                            <h3>Payment Volume (30 days)</h3>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="volumeChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="card chart-card-small">
+                        <div class="card-header">
+                            <h3>Status Breakdown</h3>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="statusChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h3>PSP Distribution</h3>
+                    </div>
+                    <div class="card-body">
+                        <div id="pspDistribution" class="psp-bars"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Payments Page -->
+            <section class="page" id="page-payments">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Recent Payments</h3>
+                        <div class="pagination" id="paymentsPagination"></div>
+                    </div>
+                    <div class="card-body table-wrapper">
+                        <table class="data-table" id="paymentsTable">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Order</th>
+                                    <th>Amount</th>
+                                    <th>Currency</th>
+                                    <th>Status</th>
+                                    <th>PSP</th>
+                                    <th>Created</th>
+                                </tr>
+                            </thead>
+                            <tbody id="paymentsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Ledger Page -->
+            <section class="page" id="page-ledger">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Ledger Accounts</h3>
+                    </div>
+                    <div class="card-body">
+                        <div id="ledgerAccounts" class="ledger-grid"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- PSP Health Page -->
+            <section class="page" id="page-psp-health">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Payment Service Provider Health</h3>
+                    </div>
+                    <div class="card-body">
+                        <div id="pspHealthCards" class="psp-health-grid"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Activity Page -->
+            <section class="page" id="page-activity">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Activity Feed</h3>
+                    </div>
+                    <div class="card-body">
+                        <div id="activityFeed" class="activity-list"></div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+    <script src="/dashboard/js/dashboard.js"></script>
+</body>
+</html>
