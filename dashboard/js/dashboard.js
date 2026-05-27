@@ -281,6 +281,7 @@
 
     // ── Ledger Page ─────────────────────────────────────────────
     async function loadLedger() {
+        // Load account balances
         const accounts = ['PSP_SETTLEMENT', 'MERCHANT_PAY', 'PLATFORM_FEE', 'REFUND_EXP'];
         const container = document.getElementById('ledgerAccounts');
         container.innerHTML = '';
@@ -306,6 +307,40 @@
                     </div>`;
             }
         }
+
+        // Load recent journal entries
+        try {
+            const res = await fetch('/v1/ledger/entries?limit=50');
+            const data = await res.json();
+            if (data.success && data.data && data.data.entries) {
+                renderLedgerEntries(data.data.entries);
+            }
+        } catch (e) {
+            console.error('Failed to load ledger entries:', e);
+        }
+    }
+
+    function renderLedgerEntries(entries) {
+        const tbody = document.getElementById('ledgerEntriesBody');
+        if (!tbody) return;
+
+        tbody.innerHTML = (entries || []).map(e => {
+            const desc = e.description || '—';
+            const debitStr = e.debit > 0 ? formatCurrency(e.debit) : '';
+            const creditStr = e.credit > 0 ? formatCurrency(e.credit) : '';
+            const txBadgeClass = e.transaction_type === 'payment_capture' ? 'captured' :
+                                 e.transaction_type === 'refund' ? 'refunded' : 'created';
+            return `
+                <tr>
+                    <td>${formatTime(e.created_at)}</td>
+                    <td><strong>${e.account_code}</strong><br><span style="color:var(--text-muted);font-size:0.72rem">${e.account_name}</span></td>
+                    <td><span class="status-badge ${txBadgeClass}">${e.transaction_type}</span></td>
+                    <td style="color:${e.debit > 0 ? 'var(--accent-green)' : 'var(--text-muted)'}">${debitStr}</td>
+                    <td style="color:${e.credit > 0 ? 'var(--accent-red)' : 'var(--text-muted)'}">${creditStr}</td>
+                    <td>${formatCurrency(e.running_balance)}</td>
+                    <td style="color:var(--text-muted);font-size:0.8rem">${escapeHtml(desc)}</td>
+                </tr>`;
+        }).join('') || '<tr><td colspan="7" style="text-align:center;color:#64748b;padding:40px">No ledger entries yet</td></tr>';
     }
 
     // ── PSP Health Page ─────────────────────────────────────────

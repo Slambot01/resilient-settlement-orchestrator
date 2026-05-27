@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -36,4 +37,22 @@ func (h *LedgerHandler) GetAccountBalance(w http.ResponseWriter, r *http.Request
 	}
 
 	response.JSON(w, http.StatusOK, res)
+}
+
+// GetRecentEntries handles GET /v1/ledger/entries?limit=50
+func (h *LedgerHandler) GetRecentEntries(w http.ResponseWriter, r *http.Request) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+
+	entries, err := h.svc.GetRecentEntries(r.Context(), limit)
+	if err != nil {
+		response.ErrorWithDetails(w, http.StatusInternalServerError, "LEDGER_ERROR", "failed to fetch entries", err.Error())
+		return
+	}
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"entries": entries,
+	})
 }

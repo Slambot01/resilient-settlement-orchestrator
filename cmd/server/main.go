@@ -140,6 +140,7 @@ func main() {
 		
 		r.Route("/ledger", func(r chi.Router) {
 			r.Get("/accounts/{code}/balance", ledgerHandler.GetAccountBalance)
+			r.Get("/entries", ledgerHandler.GetRecentEntries)
 		})
 
 		r.Post("/webhooks/{psp}", webhookHandler.HandleWebhook)

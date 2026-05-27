@@ -155,3 +155,48 @@ func (s *LedgerService) GetAccountBalance(ctx context.Context, accountCode strin
 
 	return &resp, nil
 }
+
+// LedgerEntryRow is a flat row for displaying ledger entries in the dashboard.
+type LedgerEntryRow struct {
+	ID             string    `json:"id"`
+	TransactionID  string    `json:"transaction_id"`
+	AccountCode    string    `json:"account_code"`
+	AccountName    string    `json:"account_name"`
+	Debit          int64     `json:"debit"`
+	Credit         int64     `json:"credit"`
+	RunningBalance int64     `json:"running_balance"`
+	Description    *string   `json:"description,omitempty"`
+	TxType         string    `json:"transaction_type"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+// GetRecentEntries returns the most recent ledger entries with account info.
+func (s *LedgerService) GetRecentEntries(ctx context.Context, limit int) ([]LedgerEntryRow, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT e.id, e.transaction_id, a.account_code, a.account_name,
+			e.debit, e.credit, e.running_balance, e.description,
+			t.transaction_type, e.created_at
+		FROM ledger_entries e
+		JOIN ledger_accounts a ON a.id = e.account_id
+		JOIN ledger_transactions t ON t.id = e.transaction_id
+		ORDER BY e.created_at DESC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("querying ledger entries: %w", err)
+	}
+	defer rows.Close()
+
+	var result []LedgerEntryRow
+	for rows.Next() {
+		var r LedgerEntryRow
+		if err := rows.Scan(&r.ID, &r.TransactionID, &r.AccountCode, &r.AccountName,
+			&r.Debit, &r.Credit, &r.RunningBalance, &r.Description,
+			&r.TxType, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, r)
+	}
+
+	return result, nil
+}
