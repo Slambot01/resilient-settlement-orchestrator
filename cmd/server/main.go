@@ -19,6 +19,7 @@ import (
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/handler"
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/middleware"
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/models"
+	"github.com/Slambot01/resilient-settlement-orchestrator/internal/pkg/metrics"
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/service"
 )
 
@@ -120,10 +121,12 @@ func main() {
 	r.Use(middleware.Logger(logger))
 	r.Use(middleware.Recoverer(logger))
 	r.Use(chimw.Timeout(30 * time.Second))
+	r.Use(metrics.HTTPMetrics)
 
 	// ── Register routes ─────────────────────────────────────────────
 	r.Get("/healthz", healthHandler.Health)
 	r.Get("/readyz", healthHandler.Ready)
+	r.Get("/metrics", metrics.Handler())
 
 	// API v1 routes
 	r.Route("/v1", func(r chi.Router) {
