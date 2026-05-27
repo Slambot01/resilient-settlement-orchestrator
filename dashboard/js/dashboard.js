@@ -436,6 +436,7 @@
         btn.classList.add('spinning');
         loadPageData(currentPage);
         setTimeout(() => btn.classList.remove('spinning'), 800);
+        resetAutoRefresh();
     });
 
     // ── Mobile Menu Toggle ──────────────────────────────────────
@@ -443,7 +444,104 @@
         document.getElementById('sidebar').classList.toggle('open');
     });
 
+    // ── Auto-Refresh (30s polling) ──────────────────────────────
+    const AUTO_REFRESH_INTERVAL = 30000;
+    let autoRefreshTimer = null;
+    let countdownTimer = null;
+    let countdown = 30;
+
+    function startAutoRefresh() {
+        stopAutoRefresh();
+        countdown = AUTO_REFRESH_INTERVAL / 1000;
+        updateCountdown();
+
+        countdownTimer = setInterval(() => {
+            countdown--;
+            if (countdown <= 0) countdown = AUTO_REFRESH_INTERVAL / 1000;
+            updateCountdown();
+        }, 1000);
+
+        autoRefreshTimer = setInterval(() => {
+            loadPageData(currentPage);
+            countdown = AUTO_REFRESH_INTERVAL / 1000;
+        }, AUTO_REFRESH_INTERVAL);
+    }
+
+    function stopAutoRefresh() {
+        if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+        if (countdownTimer) clearInterval(countdownTimer);
+        autoRefreshTimer = null;
+        countdownTimer = null;
+    }
+
+    function resetAutoRefresh() {
+        stopAutoRefresh();
+        startAutoRefresh();
+    }
+
+    function updateCountdown() {
+        const text = document.querySelector('.status-text');
+        if (text && text.textContent !== 'Disconnected') {
+            text.textContent = `Connected · ${countdown}s`;
+        }
+    }
+
+    // ── Enhanced PSP Health with Success Rate Bar ────────────────
+    const originalLoadPSPHealth = loadPSPHealth;
+    loadPSPHealth = async function() {
+        const data = await apiFetch('/psp-health');
+        if (!data || !data.providers) return;
+
+        const container = document.getElementById('pspHealthCards');
+        container.innerHTML = data.providers.map(p => {
+            const successPct = Math.min(100, Math.max(0, p.success_rate));
+            const dbSuccessPct = Math.min(100, Math.max(0, p.db_success_rate));
+            const barColor = successPct >= 95 ? 'var(--accent-green)' :
+                             successPct >= 80 ? 'var(--accent-amber)' : 'var(--accent-red)';
+            return `
+            <div class="psp-card">
+                <div class="psp-card-header">
+                    <span class="psp-name">${p.psp.toUpperCase()}</span>
+                    <span class="circuit-badge ${p.circuit_state}">${p.circuit_state}</span>
+                </div>
+                <div class="psp-metrics">
+                    <div class="psp-metric">
+                        <div class="psp-metric-label">Total Requests</div>
+                        <div class="psp-metric-value">${p.total_requests}</div>
+                    </div>
+                    <div class="psp-metric">
+                        <div class="psp-metric-label">Failures</div>
+                        <div class="psp-metric-value" style="color:${p.total_failures > 0 ? 'var(--accent-red)' : 'inherit'}">${p.total_failures}</div>
+                    </div>
+                    <div class="psp-metric">
+                        <div class="psp-metric-label">Live Success</div>
+                        <div class="psp-metric-value">${p.success_rate.toFixed(1)}%</div>
+                    </div>
+                    <div class="psp-metric">
+                        <div class="psp-metric-label">DB Success</div>
+                        <div class="psp-metric-value">${p.db_success_rate.toFixed(1)}%</div>
+                    </div>
+                </div>
+                <div class="psp-sparkline">
+                    <div class="sparkline-label">Live health</div>
+                    <div class="sparkline-track">
+                        <div class="sparkline-fill" style="width:${successPct}%;background:${barColor}"></div>
+                    </div>
+                    <span class="sparkline-value">${successPct.toFixed(0)}%</span>
+                </div>
+                <div class="psp-sparkline">
+                    <div class="sparkline-label">DB health</div>
+                    <div class="sparkline-track">
+                        <div class="sparkline-fill" style="width:${dbSuccessPct}%;background:${dbSuccessPct >= 95 ? 'var(--accent-blue)' : 'var(--accent-amber)'}"></div>
+                    </div>
+                    <span class="sparkline-value">${dbSuccessPct.toFixed(0)}%</span>
+                </div>
+            </div>`;
+        }).join('');
+    };
+
     // ── Initial Load ────────────────────────────────────────────
     loadOverview();
+    startAutoRefresh();
 
 })();

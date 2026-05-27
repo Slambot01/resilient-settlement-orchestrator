@@ -563,6 +563,51 @@ body {
     font-weight: 600;
 }
 
+/* ── PSP Sparkline Health Bars ─────────────────────────────────── */
+.psp-sparkline {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-subtle);
+}
+
+.psp-sparkline:first-of-type {
+    margin-top: 16px;
+}
+
+.sparkline-label {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    width: 70px;
+    flex-shrink: 0;
+}
+
+.sparkline-track {
+    flex: 1;
+    height: 6px;
+    background: var(--bg-card);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.sparkline-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.6s ease, background 0.3s ease;
+}
+
+.sparkline-value {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    width: 36px;
+    text-align: right;
+}
+
 /* ── PSP Distribution Bars ─────────────────────────────────────── */
 .psp-bars {
     display: flex;
