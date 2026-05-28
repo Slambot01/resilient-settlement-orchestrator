@@ -104,7 +104,7 @@ func main() {
 
 	// ── Initialize Handlers ─────────────────────────────────────────
 	
-	healthHandler := handler.NewHealthHandler(cfg)
+	healthHandler := handler.NewHealthHandler(cfg, dbPool, redisClient)
 	paymentHandler := handler.NewPaymentHandler(paymentService)
 	ledgerHandler := handler.NewLedgerHandler(ledgerService)
 	webhookHandler := handler.NewWebhookHandler(webhookService)
