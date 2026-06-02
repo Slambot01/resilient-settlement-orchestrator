@@ -201,3 +201,76 @@ func (s *PaymentService) updatePaymentState(ctx context.Context, paymentID strin
 
 	return tx.Commit(ctx)
 }
+
+// CapturePayment captures an authorized payment.
+func (s *PaymentService) CapturePayment(ctx context.Context, id string) (*models.PaymentResponse, error) {
+	p, err := s.GetPayment(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if p.Status != models.PaymentStatusAuthorized {
+		return nil, fmt.Errorf("payment not authorized")
+	}
+
+	adp, err := s.router.GetAdapter(models.PSPName(p.PSP))
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = adp.CapturePayment(ctx, p.PSPPaymentID, p.Amount)
+	if err != nil {
+		return nil, fmt.Errorf("psp capture failed: %w", err)
+	}
+
+	return s.GetPayment(ctx, id)
+}
+
+// RefundPayment refunds a captured payment.
+func (s *PaymentService) RefundPayment(ctx context.Context, id string, amount int64) (*models.PaymentResponse, error) {
+	p, err := s.GetPayment(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	adp, err := s.router.GetAdapter(models.PSPName(p.PSP))
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = adp.RefundPayment(ctx, p.PSPPaymentID, amount)
+	if err != nil {
+		return nil, fmt.Errorf("psp refund failed: %w", err)
+	}
+
+	return s.GetPayment(ctx, id)
+}
+
+// CancelPayment cancels an authorized payment.
+func (s *PaymentService) CancelPayment(ctx context.Context, id string) (*models.PaymentResponse, error) {
+	p, err := s.GetPayment(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if p.Status != models.PaymentStatusAuthorized {
+		return nil, fmt.Errorf("payment not authorized")
+	}
+
+	adp, err := s.router.GetAdapter(models.PSPName(p.PSP))
+	if err != nil {
+		return nil, err
+	}
+
+	err = adp.CancelPayment(ctx, p.PSPPaymentID)
+	if err != nil {
+		return nil, fmt.Errorf("psp cancel failed: %w", err)
+	}
+
+	err = s.updatePaymentState(ctx, id, p.Status, models.PaymentStatusCancelled, p.PSPPaymentID, "Payment cancelled via API", "api")
+	if err != nil {
+		return nil, err
+	}
+
+	return s.GetPayment(ctx, id)
+}

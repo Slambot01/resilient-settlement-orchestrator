@@ -33,6 +33,15 @@ func (r *PaymentRouter) LoadRules(rules []models.RoutingRule) {
 	r.rules = rules
 }
 
+// GetAdapter returns the PSP adapter by name.
+func (r *PaymentRouter) GetAdapter(name models.PSPName) (adapter.PSPAdapter, error) {
+	adp, ok := r.adapters[name]
+	if !ok {
+		return nil, fmt.Errorf("PSP adapter %q not found", name)
+	}
+	return adp, nil
+}
+
 // RecordSuccess signals a successful PSP call to the circuit breaker.
 func (r *PaymentRouter) RecordSuccess(psp models.PSPName) {
 	if cb, ok := r.breakers[psp]; ok {

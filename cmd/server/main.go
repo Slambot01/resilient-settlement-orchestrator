@@ -139,6 +139,9 @@ func main() {
 			r.Use(middleware.Idempotency(redisClient))
 			r.Post("/", paymentHandler.CreatePayment)
 			r.Get("/{id}", paymentHandler.GetPayment)
+			r.Post("/{id}/capture", paymentHandler.CapturePayment)
+			r.Post("/{id}/refund", paymentHandler.RefundPayment)
+			r.Post("/{id}/cancel", paymentHandler.CancelPayment)
 		})
 		
 		r.Route("/ledger", func(r chi.Router) {
