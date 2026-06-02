@@ -55,6 +55,32 @@ curl http://localhost:8080/healthz
 | POST | `/v1/payments/{id}/capture` | Capture payment |
 | POST | `/v1/payments/{id}/refund` | Refund payment |
 | POST | `/v1/payments/{id}/cancel` | Cancel payment |
+| POST | `/v1/webhooks/{psp}` | PSP webhook ingestion |
+| GET | `/v1/ledger/accounts/{code}/balance` | Get account balance |
+| GET | `/v1/ledger/entries` | Get recent ledger entries |
+
+## Performance Benchmarks
+
+Load tested with [hey](https://github.com/rakyll/hey) — 10,000 requests at 50 concurrent connections against a single-node local setup (PostgreSQL 16 + Redis 7).
+
+| Metric | Value |
+|--------|-------|
+| **Throughput** | 302 req/sec |
+| **Avg Latency** | 153ms |
+| **P90 Latency** | 203ms |
+| **P99 Latency** | 517ms |
+| **Success Rate** | 99.98% (9,998 / 10,000) |
+| **Fastest** | 56ms |
+| **Slowest** | 1.17s |
+
+> The 0.02% error rate is intentional — the Mock PSP simulates a 95% authorization success rate to validate circuit breaker and retry logic under realistic failure conditions.
+
+```
+hey -n 10000 -c 50 -m POST \
+  -H "Content-Type: application/json" \
+  -D payload.json \
+  http://localhost:8080/v1/payments
+```
 
 ## Architecture
 
