@@ -153,3 +153,92 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/payments/{id}/capture:
+    post:
+      summary: Capture an Authorized Payment
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Payment Captured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResponse'
+  /v1/payments/{id}/refund:
+    post:
+      summary: Refund a Captured Payment
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - amount
+              properties:
+                amount:
+                  type: integer
+      responses:
+        '200':
+          description: Payment Refunded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResponse'
+  /v1/payments/{id}/cancel:
+    post:
+      summary: Cancel an Authorized Payment
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Payment Cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResponse'
+  /v1/webhooks/{psp}:
+    post:
+      summary: PSP Webhook Endpoint
+      parameters:
+        - in: path
+          name: psp
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Webhook Processed
+  /v1/ledger/accounts/{code}/balance:
+    get:
+      summary: Get Account Balance
+      parameters:
+        - in: path
+          name: code
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Account Balance Returned
+  /v1/ledger/entries:
+    get:
+      summary: Get Recent Ledger Entries
+      responses:
+        '200':
+          description: Ledger Entries Returned
