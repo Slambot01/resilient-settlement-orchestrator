@@ -7,6 +7,7 @@ import (
 	"github.com/stripe/stripe-go/v82"
 	"github.com/stripe/stripe-go/v82/paymentintent"
 	"github.com/stripe/stripe-go/v82/refund"
+	"github.com/stripe/stripe-go/v82/webhook"
 )
 
 // StripeAdapter wraps the Stripe SDK behind the PSPAdapter interface.
@@ -118,10 +119,9 @@ func (s *StripeAdapter) GetPaymentStatus(ctx context.Context, pspPaymentID strin
 }
 
 func (s *StripeAdapter) VerifyWebhookSignature(payload []byte, signature string) error {
-	// In production, use stripe.webhook.ConstructEvent(payload, signature, s.webhookSecret)
-	// For sandbox testing, we do a basic check
-	if signature == "" {
-		return fmt.Errorf("stripe: missing webhook signature")
+	_, err := webhook.ConstructEvent(payload, signature, s.webhookSecret)
+	if err != nil {
+		return fmt.Errorf("stripe: invalid webhook signature: %w", err)
 	}
 	return nil
 }
