@@ -1,0 +1,155 @@
+openapi: 3.0.3
+info:
+  title: Resilient Settlement Orchestrator API
+  version: 1.0.0
+  description: API for the Resilient Settlement Orchestrator - Payment Orchestration and Ledger System.
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              example: INVALID_REQUEST
+            message:
+              type: string
+              example: amount must be greater than zero
+            details:
+              type: string
+    CreatePaymentRequest:
+      type: object
+      required:
+        - amount
+        - currency
+        - order_id
+        - merchant_id
+      properties:
+        amount:
+          type: integer
+          description: Amount in smallest currency unit (e.g., cents)
+          example: 1000
+        currency:
+          type: string
+          description: 3-letter currency code
+          example: USD
+        order_id:
+          type: string
+          example: ord_12345
+        merchant_id:
+          type: string
+          example: m_98765
+    PaymentResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            id:
+              type: string
+              example: pay_abc123
+            amount:
+              type: integer
+              example: 1000
+            currency:
+              type: string
+              example: USD
+            status:
+              type: string
+              example: created
+            order_id:
+              type: string
+              example: ord_12345
+            merchant_id:
+              type: string
+              example: m_98765
+            created_at:
+              type: string
+              format: date-time
+            updated_at:
+              type: string
+              format: date-time
+security:
+  - BearerAuth: []
+paths:
+  /healthz:
+    get:
+      summary: Liveness Probe
+      description: Returns 200 if the process is alive.
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+  /readyz:
+    get:
+      summary: Readiness Probe
+      description: Returns 200 if the process and its dependencies (DB, Redis) are ready.
+      security: []
+      responses:
+        '200':
+          description: OK
+        '503':
+          description: Service Unavailable
+  /v1/payments:
+    post:
+      summary: Create a Payment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePaymentRequest'
+      responses:
+        '201':
+          description: Payment Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResponse'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/payments/{id}:
+    get:
+      summary: Get Payment Status
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Payment Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'

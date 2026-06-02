@@ -4,14 +4,14 @@ A production-grade **Payment Orchestration + Ledger System** built in Go that ha
 
 ## Features
 
-- **Multi-PSP Abstraction** — Unified interface for Stripe, Razorpay, and Mock PSPs
-- **Intelligent Routing** — Rule-based payment routing with cost optimization and fallback
-- **Double-Entry Ledger** — Financial-grade bookkeeping with balance integrity guarantees
-- **Failure Handling** — Circuit breakers, retries with exponential backoff, fallback routing
-- **Webhook Processing** — Idempotent, signature-verified webhook handling with DLQ
-- **Reconciliation Engine** — Real-time and batch reconciliation with discrepancy detection
-- **Complete Audit Trail** — Every state transition, ledger entry, and webhook is recorded
-- **Observability** — Structured logging, Prometheus metrics, health checks
+- **Multi-PSP Abstraction** - Unified interface for Stripe, Razorpay, and Mock PSPs
+- **Intelligent Routing** - Rule-based payment routing with cost optimization and fallback
+- **Double-Entry Ledger** - Financial-grade bookkeeping with balance integrity guarantees
+- **Failure Handling** - Circuit breakers, retries with exponential backoff, fallback routing
+- **Webhook Processing** - Idempotent, signature-verified webhook handling with DLQ
+- **Reconciliation Engine** - Real-time and batch reconciliation with discrepancy detection
+- **Complete Audit Trail** - Every state transition, ledger entry, and webhook is recorded
+- **Observability** - Structured logging, Prometheus metrics, health checks
 
 ## Tech Stack
 
