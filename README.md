@@ -58,7 +58,7 @@ curl http://localhost:8080/healthz
 
 ## Architecture
 
-See [`docs/architecture.md.resolved`](docs/architecture.md.resolved) for the full architecture document.
+See [`docs/architecture.md`](docs/architecture.md) for the full architecture document.
 
 ## License
 
