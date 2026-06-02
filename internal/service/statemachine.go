@@ -9,7 +9,7 @@ import (
 // validTransitions defines every legal status change.
 // Any transition not listed here is rejected.
 var validTransitions = map[models.PaymentStatus][]models.PaymentStatus{
-	models.PaymentStatusCreated:    {models.PaymentStatusPending, models.PaymentStatusFailed},
+	models.PaymentStatusCreated:    {models.PaymentStatusPending, models.PaymentStatusAuthorized, models.PaymentStatusFailed},
 	models.PaymentStatusPending:    {models.PaymentStatusAuthorized, models.PaymentStatusCaptured, models.PaymentStatusFailed},
 	models.PaymentStatusAuthorized: {models.PaymentStatusCaptured, models.PaymentStatusCancelled, models.PaymentStatusFailed},
 	models.PaymentStatusCaptured:   {models.PaymentStatusRefunded, models.PaymentStatusPartiallyRefunded},
