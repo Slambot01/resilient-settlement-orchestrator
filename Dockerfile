@@ -23,6 +23,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /app/server ./cmd/server
 # Final stage
 FROM alpine:3.19
 
+# Create non-root user for security (V-006 fix)
+RUN addgroup -S app && adduser -S app -G app
+
 WORKDIR /app
 
 # Copy certificates and timezone data from builder
@@ -36,12 +39,18 @@ COPY --from=builder /app/migrations ./migrations
 # Copy dashboard static files
 COPY --from=builder /app/dashboard ./dashboard
 
+# Ensure app user owns the working directory
+RUN chown -R app:app /app
+
 # Set environment variables for production (can be overridden)
 ENV SERVER_ENV=production
 ENV SERVER_PORT=8080
 
 # Expose port
 EXPOSE 8080
+
+# Run as non-root user
+USER app
 
 # Run the binary
 CMD ["./server"]

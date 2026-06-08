@@ -53,20 +53,11 @@ func TestHealth_Returns200(t *testing.T) {
 		t.Errorf("expected service payment-orchestrator, got %v", data["service"])
 	}
 
-	if data["version"] != "0.1.0" {
-		t.Errorf("expected version 0.1.0, got %v", data["version"])
-	}
-
-	if data["env"] != "test" {
-		t.Errorf("expected env test, got %v", data["env"])
-	}
-
-	if data["go_version"] == nil || data["go_version"] == "" {
-		t.Error("expected go_version to be set")
-	}
-
-	if data["uptime"] == nil {
-		t.Error("expected uptime to be set")
+	// V-010: these fields should NOT be present (removed for security)
+	for _, field := range []string{"version", "env", "go_version", "uptime", "goroutines"} {
+		if data[field] != nil {
+			t.Errorf("field %q should not be exposed in health endpoint (V-010)", field)
+		}
 	}
 }
 
@@ -115,22 +106,14 @@ func TestReady_NilDependencies_Returns503(t *testing.T) {
 		t.Fatal("expected checks map")
 	}
 
-	// DB check should report down
-	dbCheck, ok := checks["database"].(map[string]interface{})
-	if !ok {
-		t.Fatal("expected database check map")
-	}
-	if dbCheck["status"] != "down" {
-		t.Errorf("expected database status down, got %v", dbCheck["status"])
+	// V-010: checks are now simple strings, not nested maps
+	if checks["database"] != "not_configured" {
+		t.Errorf("expected database status not_configured, got %v", checks["database"])
 	}
 
-	// Redis check should report down
-	redisCheck, ok := checks["redis"].(map[string]interface{})
-	if !ok {
-		t.Fatal("expected redis check map")
-	}
-	if redisCheck["status"] != "down" {
-		t.Errorf("expected redis status down, got %v", redisCheck["status"])
+	// Redis nil check should report not_configured
+	if checks["redis"] != "not_configured" {
+		t.Errorf("expected redis status not_configured, got %v", checks["redis"])
 	}
 }
 

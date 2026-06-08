@@ -92,14 +92,15 @@ func (s *WebhookService) ingestWebhookInternal(ctx context.Context, psp, eventTy
 		)
 	}
 
-	// 6. Insert webhook record
+	// 6. Insert webhook record (V-004 fix: don't store raw signature — store verification status only)
 	webhookID := uuid.NewString()
 	now := time.Now().UTC()
+	signatureStatus := "verified" // Signature was validated in step 2; never store the raw value
 
 	_, err = s.db.Exec(ctx, `
 		INSERT INTO webhook_events (id, psp, event_type, raw_payload, signature, psp_payment_id, internal_payment_id, status, idempotency_key, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-	`, webhookID, psp, eventType, string(payload), signature, pspPaymentID, nilIfEmpty(internalPaymentID), models.WebhookStatusProcessing, idempotencyKey, now)
+	`, webhookID, psp, eventType, string(payload), signatureStatus, pspPaymentID, nilIfEmpty(internalPaymentID), models.WebhookStatusProcessing, idempotencyKey, now)
 	if err != nil {
 		return fmt.Errorf("inserting webhook event: %w", err)
 	}

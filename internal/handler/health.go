@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"net/http"
-	"runtime"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -33,39 +32,47 @@ func NewHealthHandler(cfg *config.Config, db *pgxpool.Pool, rdb *redis.Client) *
 
 // Health is the liveness probe. Returns 200 if the process is alive.
 // Kubernetes uses this to decide whether to restart the pod.
+// Intentionally minimal — no internal details exposed (V-010 fix).
 func (h *HealthHandler) Health(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, map[string]interface{}{
-		"status":     "healthy",
-		"service":    "payment-orchestrator",
-		"version":    "0.1.0",
-		"env":        h.cfg.Server.Env,
-		"uptime":     time.Since(h.startTime).String(),
-		"go_version": runtime.Version(),
-		"goroutines": runtime.NumGoroutine(),
+		"status":  "healthy",
+		"service": "payment-orchestrator",
 	})
 }
 
 // Ready is the readiness probe. Returns 200 only if all dependencies are reachable.
 // Kubernetes uses this to decide whether to route traffic to the pod.
+// Only exposes up/down status — no pool stats, error messages, or internal details (V-010 fix).
 func (h *HealthHandler) Ready(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 
-	checks := make(map[string]interface{})
+	checks := make(map[string]string)
 	allHealthy := true
 
-	// Deep PostgreSQL check
-	dbCheck := h.checkDatabase(ctx)
-	checks["database"] = dbCheck
-	if dbCheck["status"] != "up" {
+	// PostgreSQL check — up/down only
+	if h.db != nil {
+		if err := h.db.Ping(ctx); err != nil {
+			checks["database"] = "down"
+			allHealthy = false
+		} else {
+			checks["database"] = "up"
+		}
+	} else {
+		checks["database"] = "not_configured"
 		allHealthy = false
 	}
 
-	// Deep Redis check
-	redisCheck := h.checkRedis(ctx)
-	checks["redis"] = redisCheck
-	if redisCheck["status"] != "up" {
-		allHealthy = false
+	// Redis check — up/down only
+	if h.redis != nil {
+		if err := h.redis.Ping(ctx).Err(); err != nil {
+			checks["redis"] = "down"
+			allHealthy = false
+		} else {
+			checks["redis"] = "up"
+		}
+	} else {
+		checks["redis"] = "not_configured"
 	}
 
 	status := http.StatusOK
@@ -79,74 +86,4 @@ func (h *HealthHandler) Ready(w http.ResponseWriter, r *http.Request) {
 		"status": statusText,
 		"checks": checks,
 	})
-}
-
-// checkDatabase performs a deep PostgreSQL health check.
-func (h *HealthHandler) checkDatabase(ctx context.Context) map[string]interface{} {
-	result := map[string]interface{}{
-		"status": "down",
-	}
-
-	if h.db == nil {
-		result["error"] = "not configured"
-		return result
-	}
-
-	start := time.Now()
-
-	// Ping the database
-	if err := h.db.Ping(ctx); err != nil {
-		result["error"] = err.Error()
-		result["latency_ms"] = time.Since(start).Milliseconds()
-		return result
-	}
-
-	// Check connection pool stats
-	stats := h.db.Stat()
-	result["status"] = "up"
-	result["latency_ms"] = time.Since(start).Milliseconds()
-	result["pool"] = map[string]interface{}{
-		"total_conns":   stats.TotalConns(),
-		"idle_conns":    stats.IdleConns(),
-		"acquired":      stats.AcquiredConns(),
-		"max_conns":     stats.MaxConns(),
-	}
-
-	return result
-}
-
-// checkRedis performs a deep Redis health check.
-func (h *HealthHandler) checkRedis(ctx context.Context) map[string]interface{} {
-	result := map[string]interface{}{
-		"status": "down",
-	}
-
-	if h.redis == nil {
-		result["error"] = "not configured"
-		return result
-	}
-
-	start := time.Now()
-
-	// Ping Redis
-	if err := h.redis.Ping(ctx).Err(); err != nil {
-		result["error"] = err.Error()
-		result["latency_ms"] = time.Since(start).Milliseconds()
-		return result
-	}
-
-	result["status"] = "up"
-	result["latency_ms"] = time.Since(start).Milliseconds()
-
-	// Get pool stats
-	poolStats := h.redis.PoolStats()
-	result["pool"] = map[string]interface{}{
-		"total_conns": poolStats.TotalConns,
-		"idle_conns":  poolStats.IdleConns,
-		"stale_conns": poolStats.StaleConns,
-		"hits":        poolStats.Hits,
-		"misses":      poolStats.Misses,
-	}
-
-	return result
 }

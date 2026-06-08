@@ -162,6 +162,7 @@ func main() {
 	r.Use(chimw.RequestID)
 	r.Use(chimw.RealIP)
 	r.Use(middleware.CORS(middleware.DefaultCORSConfig()))
+	r.Use(middleware.SecurityHeaders) // HSTS, CSP, X-Frame-Options, etc.
 	r.Use(middleware.MaxBodySize(1 << 20)) // 1 MB global body limit
 	limiter := middleware.NewRateLimiter(100, time.Second, 200) // 100 req/s per IP, burst 200
 	r.Use(limiter.Handler())
@@ -171,9 +172,15 @@ func main() {
 	r.Use(metrics.HTTPMetrics)
 
 	// ── Register routes ─────────────────────────────────────────────
+	// Health probes — public (required by K8s liveness/readiness)
 	r.Get("/healthz", healthHandler.Health)
 	r.Get("/readyz", healthHandler.Ready)
-	r.Get("/metrics", metrics.Handler())
+
+	// Metrics — protected by API key (V-009 fix)
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.APIKeyAuth(merchantKeys))
+		r.Get("/metrics", metrics.Handler())
+	})
 
 	// API v1 routes
 	r.Route("/v1", func(r chi.Router) {
@@ -224,15 +231,15 @@ func main() {
 				r.Get("/psp-health", dashboardHandler.GetPSPHealth)
 				r.Get("/payments", dashboardHandler.GetRecentPayments)
 				r.Get("/activity", dashboardHandler.GetActivityFeed)
+
+				// Static dashboard files — served behind auth (V-008 fix)
+				dashboardFS := http.StripPrefix("/v1/admin/dashboard/ui", http.FileServer(http.Dir("dashboard")))
+				r.Handle("/ui/*", dashboardFS)
+				r.Get("/ui", func(w http.ResponseWriter, r *http.Request) {
+					http.Redirect(w, r, "/v1/admin/dashboard/ui/index.html", http.StatusMovedPermanently)
+				})
 			})
 		})
-	})
-
-	// ── Serve Dashboard static files ────────────────────────────────
-	dashboardFS := http.FileServer(http.Dir("dashboard"))
-	r.Handle("/dashboard/*", http.StripPrefix("/dashboard", dashboardFS))
-	r.Get("/dashboard", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/dashboard/index.html", http.StatusMovedPermanently)
 	})
 
 	// ── Start server with graceful shutdown ──────────────────────────

@@ -50,7 +50,13 @@ func Idempotency(rdb *redis.Client) func(http.Handler) http.Handler {
 			}
 
 			ctx := r.Context()
-			redisKey := "idempotency:" + key
+
+			// Namespace by merchant to prevent cross-merchant cache poisoning (V-007 fix)
+			merchantID := MerchantIDFromContext(ctx)
+			if merchantID == "" {
+				merchantID = "_anonymous"
+			}
+			redisKey := "idempotency:" + merchantID + ":" + key
 
 			// Atomic claim: SET key "processing" NX EX ttl
 			claimed, err := rdb.SetNX(ctx, redisKey, processingMarker, idempotencyTTL).Result()
