@@ -54,6 +54,8 @@ type Payment struct {
 	PaymentMethodType    string                 `json:"payment_method_type,omitempty"`
 	PaymentMethodDetails map[string]interface{} `json:"payment_method_details,omitempty"`
 
+	TotalRefunded int64 `json:"total_refunded"`
+
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`

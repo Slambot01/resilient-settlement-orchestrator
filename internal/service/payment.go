@@ -132,9 +132,9 @@ func (s *PaymentService) CreatePayment(ctx context.Context, req models.CreatePay
 func (s *PaymentService) GetPayment(ctx context.Context, id string) (*models.PaymentResponse, error) {
 	var p models.Payment
 	err := s.db.QueryRow(ctx, `
-		SELECT id, merchant_id, order_id, amount, currency, status, psp, psp_payment_id, customer_email, created_at, updated_at
+		SELECT id, merchant_id, order_id, amount, currency, status, psp, psp_payment_id, customer_email, total_refunded, created_at, updated_at
 		FROM payments WHERE id = $1
-	`, id).Scan(&p.ID, &p.MerchantID, &p.OrderID, &p.Amount, &p.Currency, &p.Status, &p.PSP, &p.PSPPaymentID, &p.CustomerEmail, &p.CreatedAt, &p.UpdatedAt)
+	`, id).Scan(&p.ID, &p.MerchantID, &p.OrderID, &p.Amount, &p.Currency, &p.Status, &p.PSP, &p.PSPPaymentID, &p.CustomerEmail, &p.TotalRefunded, &p.CreatedAt, &p.UpdatedAt)
 
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -250,11 +250,24 @@ func (s *PaymentService) CapturePayment(ctx context.Context, id string) (*models
 	return s.GetPayment(ctx, id)
 }
 
-// RefundPayment refunds a captured payment.
+// RefundPayment refunds a captured payment with over-refund protection.
+// Uses SELECT FOR UPDATE to prevent concurrent refund race conditions (V-002 fix).
 func (s *PaymentService) RefundPayment(ctx context.Context, id string, amount int64) (*models.PaymentResponse, error) {
-	p, err := s.GetPayment(ctx, id)
+	// Start transaction early — we need row-level locking before any PSP call
+	tx, err := s.db.Begin(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// Lock the payment row to prevent concurrent refunds
+	var p models.Payment
+	err = tx.QueryRow(ctx, `
+		SELECT id, merchant_id, order_id, amount, currency, status, psp, psp_payment_id, total_refunded
+		FROM payments WHERE id = $1 FOR UPDATE
+	`, id).Scan(&p.ID, &p.MerchantID, &p.OrderID, &p.Amount, &p.Currency, &p.Status, &p.PSP, &p.PSPPaymentID, &p.TotalRefunded)
+	if err != nil {
+		return nil, ErrPaymentNotFound
 	}
 
 	// Only captured or partially refunded payments can be refunded
@@ -262,6 +275,14 @@ func (s *PaymentService) RefundPayment(ctx context.Context, id string, amount in
 		return nil, fmt.Errorf("payment must be captured or partially refunded to refund, current status: %s", p.Status)
 	}
 
+	// Over-refund protection: cumulative refunded + this request must not exceed original amount
+	remaining := p.Amount - p.TotalRefunded
+	if amount > remaining {
+		return nil, fmt.Errorf("refund amount %d exceeds remaining refundable amount %d (original: %d, already refunded: %d)",
+			amount, remaining, p.Amount, p.TotalRefunded)
+	}
+
+	// Call PSP (still under row lock — prevents concurrent PSP calls for same payment)
 	adp, err := s.router.GetAdapter(models.PSPName(p.PSP))
 	if err != nil {
 		return nil, err
@@ -272,15 +293,42 @@ func (s *PaymentService) RefundPayment(ctx context.Context, id string, amount in
 		return nil, fmt.Errorf("psp refund failed: %w", err)
 	}
 
-	// Determine new status: full refund vs partial refund
-	newStatus := models.PaymentStatusRefunded
-	if amount < p.Amount {
-		newStatus = models.PaymentStatusPartiallyRefunded
+	// Determine new status
+	newTotalRefunded := p.TotalRefunded + amount
+	newStatus := models.PaymentStatusPartiallyRefunded
+	if newTotalRefunded >= p.Amount {
+		newStatus = models.PaymentStatusRefunded
 	}
 
-	err = s.updatePaymentState(ctx, id, p.Status, newStatus, p.PSPPaymentID, "Payment refunded via API", "api")
+	now := time.Now().UTC()
+
+	// Update payment status + total_refunded atomically
+	_, err = tx.Exec(ctx, `
+		UPDATE payments SET status = $1, total_refunded = $2, updated_at = $3 WHERE id = $4
+	`, newStatus, newTotalRefunded, now, id)
 	if err != nil {
 		return nil, fmt.Errorf("updating refund state: %w", err)
+	}
+
+	// Record state transition
+	transitionID := uuid.NewString()
+	_, err = tx.Exec(ctx, `
+		INSERT INTO payment_state_transitions (id, payment_id, from_status, to_status, reason, triggered_by, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, transitionID, id, p.Status, newStatus,
+		fmt.Sprintf("Refund of %d processed (total refunded: %d/%d)", amount, newTotalRefunded, p.Amount),
+		"api", now)
+	if err != nil {
+		return nil, fmt.Errorf("recording refund transition: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit refund tx: %w", err)
+	}
+
+	// Publish event (fire-and-forget, after commit)
+	if s.pubsub != nil {
+		s.pubsub.PublishPaymentEvent(ctx, id, string(p.Status), string(newStatus), "api")
 	}
 
 	return s.GetPayment(ctx, id)
