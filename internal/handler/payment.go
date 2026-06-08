@@ -23,6 +23,12 @@ func NewPaymentHandler(svc *service.PaymentService) *PaymentHandler {
 
 // CreatePayment handles POST /v1/payments
 func (h *PaymentHandler) CreatePayment(w http.ResponseWriter, r *http.Request) {
+	// Idempotency-Key is required for payment creation to prevent duplicate charges
+	if r.Header.Get("Idempotency-Key") == "" {
+		response.Error(w, http.StatusBadRequest, "MISSING_IDEMPOTENCY_KEY", "Idempotency-Key header is required for payment creation")
+		return
+	}
+
 	var req models.CreatePaymentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_REQUEST", "malformed json payload")

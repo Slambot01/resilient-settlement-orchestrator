@@ -6,6 +6,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -74,11 +76,12 @@ func Idempotency(rdb *redis.Client) func(http.Handler) http.Handler {
 					return
 				}
 
-				// Return the cached response
+				// Return the cached response with the original status code
 				w.Header().Set("Content-Type", "application/json")
 				w.Header().Set("X-Idempotent-Replayed", "true")
-				w.WriteHeader(http.StatusOK)
-				w.Write([]byte(cached))
+				statusCode, body := parseCachedResponse(cached)
+				w.WriteHeader(statusCode)
+				w.Write([]byte(body))
 				return
 			}
 
@@ -91,9 +94,9 @@ func Idempotency(rdb *redis.Client) func(http.Handler) http.Handler {
 
 			next.ServeHTTP(rec, r)
 
-			// Cache the response body (only for successful responses)
+			// Cache the response body + status code (only for successful responses)
 			if rec.statusCode >= 200 && rec.statusCode < 300 {
-				cacheResponse(ctx, rdb, redisKey, rec.body.String())
+				cacheResponse(ctx, rdb, redisKey, rec.statusCode, rec.body.String())
 			} else {
 				// Failed request — release the key so client can retry
 				rdb.Del(ctx, redisKey)
@@ -102,10 +105,25 @@ func Idempotency(rdb *redis.Client) func(http.Handler) http.Handler {
 	}
 }
 
-func cacheResponse(ctx context.Context, rdb *redis.Client, key, body string) {
-	if err := rdb.Set(ctx, key, body, idempotencyTTL).Err(); err != nil {
+// cacheResponse stores "statusCode:body" in Redis so replayed responses use the original status.
+func cacheResponse(ctx context.Context, rdb *redis.Client, key string, statusCode int, body string) {
+	value := strconv.Itoa(statusCode) + ":" + body
+	if err := rdb.Set(ctx, key, value, idempotencyTTL).Err(); err != nil {
 		slog.Warn("idempotency: failed to cache response", slog.Any("error", err))
 	}
+}
+
+// parseCachedResponse extracts the status code and body from a cached "statusCode:body" string.
+func parseCachedResponse(cached string) (int, string) {
+	idx := strings.Index(cached, ":")
+	if idx <= 0 {
+		return http.StatusOK, cached // fallback for old format
+	}
+	code, err := strconv.Atoi(cached[:idx])
+	if err != nil {
+		return http.StatusOK, cached
+	}
+	return code, cached[idx+1:]
 }
 
 // responseRecorder captures the response so we can cache it.

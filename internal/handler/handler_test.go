@@ -142,6 +142,7 @@ func TestCreatePayment_MalformedJSON(t *testing.T) {
 	body := `{invalid json`
 	req := httptest.NewRequest(http.MethodPost, "/v1/payments", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "test-key-malformed")
 	w := httptest.NewRecorder()
 
 	h.CreatePayment(w, req)
@@ -167,6 +168,7 @@ func TestCreatePayment_ZeroAmount(t *testing.T) {
 	body := `{"amount":0,"currency":"INR","order_id":"ord_1","merchant_id":"m_1"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/payments", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "test-key-zero")
 	w := httptest.NewRecorder()
 
 	h.CreatePayment(w, req)
@@ -189,6 +191,7 @@ func TestCreatePayment_NegativeAmount(t *testing.T) {
 	body := `{"amount":-500,"currency":"INR","order_id":"ord_1","merchant_id":"m_1"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/payments", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "test-key-negative")
 	w := httptest.NewRecorder()
 
 	h.CreatePayment(w, req)
@@ -204,6 +207,7 @@ func TestCreatePayment_MissingCurrency(t *testing.T) {
 	body := `{"amount":1000,"currency":"","order_id":"ord_1","merchant_id":"m_1"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/payments", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "test-key-currency")
 	w := httptest.NewRecorder()
 
 	h.CreatePayment(w, req)
@@ -225,6 +229,7 @@ func TestCreatePayment_MissingOrderID(t *testing.T) {
 
 	body := `{"amount":1000,"currency":"INR","order_id":"","merchant_id":"m_1"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/payments", strings.NewReader(body))
+	req.Header.Set("Idempotency-Key", "test-key-order")
 	w := httptest.NewRecorder()
 
 	h.CreatePayment(w, req)
@@ -239,6 +244,7 @@ func TestCreatePayment_MissingMerchantID(t *testing.T) {
 
 	body := `{"amount":1000,"currency":"INR","order_id":"ord_1","merchant_id":""}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/payments", strings.NewReader(body))
+	req.Header.Set("Idempotency-Key", "test-key-merchant")
 	w := httptest.NewRecorder()
 
 	h.CreatePayment(w, req)

@@ -118,6 +118,10 @@ func main() {
 	// Global middleware
 	r.Use(chimw.RequestID)
 	r.Use(chimw.RealIP)
+	r.Use(middleware.CORS(middleware.DefaultCORSConfig()))
+	r.Use(middleware.MaxBodySize(1 << 20)) // 1 MB global body limit
+	limiter := middleware.NewRateLimiter(100, time.Second, 200) // 100 req/s per IP, burst 200
+	r.Use(limiter.Handler())
 	r.Use(middleware.Logger(logger))
 	r.Use(middleware.Recoverer(logger))
 	r.Use(chimw.Timeout(30 * time.Second))

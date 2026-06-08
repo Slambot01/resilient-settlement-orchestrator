@@ -12,12 +12,16 @@ import (
 
 // StripeAdapter wraps the Stripe SDK behind the PSPAdapter interface.
 // Uses test/sandbox keys — never handles raw card data.
+//
+// WARNING: stripe.Key is a process-level global. Only one StripeAdapter with one
+// secret key should exist per process. If multiple Stripe accounts are needed,
+// use stripe.BackendConfiguration with per-request API keys instead.
 type StripeAdapter struct {
 	webhookSecret string
 }
 
 func NewStripeAdapter(secretKey, webhookSecret string) *StripeAdapter {
-	stripe.Key = secretKey
+	stripe.Key = secretKey // NOTE: sets package-level global — see struct doc
 	return &StripeAdapter{
 		webhookSecret: webhookSecret,
 	}

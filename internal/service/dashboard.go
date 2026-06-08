@@ -337,7 +337,7 @@ type ActivityEvent struct {
 func (s *DashboardService) GetActivityFeed(ctx context.Context, limit int) ([]ActivityEvent, error) {
 	rows, err := s.db.Query(ctx, `
 		(
-			SELECT created_at, 'state_transition' as event_type, payment_id,
+			SELECT created_at, 'state_transition' as source_type, payment_id,
 				CONCAT(from_status, ' → ', to_status, ': ', reason) as description,
 				triggered_by as actor
 			FROM payment_state_transitions
@@ -346,14 +346,14 @@ func (s *DashboardService) GetActivityFeed(ctx context.Context, limit int) ([]Ac
 		)
 		UNION ALL
 		(
-			SELECT created_at, 'webhook' as event_type, COALESCE(internal_payment_id, '') as payment_id,
+			SELECT created_at, 'webhook' as source_type, COALESCE(internal_payment_id, '') as payment_id,
 				CONCAT(psp, '/', event_type, ' [', status, ']') as description,
 				psp as actor
 			FROM webhook_events
 			ORDER BY created_at DESC
 			LIMIT $1
 		)
-		ORDER BY timestamp DESC
+		ORDER BY created_at DESC
 		LIMIT $1
 	`, limit)
 	if err != nil {

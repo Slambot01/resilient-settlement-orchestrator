@@ -73,31 +73,22 @@ func (s *LedgerService) PostLedgerTransaction(ctx context.Context, req models.Po
 		// Concurrent transactions hitting the same account will block here until this tx commits/rolls back.
 		var accountID string
 		var currentBalance int64
+		var accType models.AccountType
 		err = tx.QueryRow(ctx, `
-			SELECT id, current_balance 
+			SELECT id, current_balance, account_type
 			FROM ledger_accounts 
 			WHERE account_code = $1 
 			FOR UPDATE
-		`, entry.AccountCode).Scan(&accountID, &currentBalance)
+		`, entry.AccountCode).Scan(&accountID, &currentBalance, &accType)
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("account not found: %s", entry.AccountCode)
+				return fmt.Errorf("%w: %s", ErrAccountNotFound, entry.AccountCode)
 			}
 			return fmt.Errorf("locking account %s: %w", entry.AccountCode, err)
 		}
 
-		// Calculate new running balance (ignoring strict debits/credits sign based on account type for simplicity here,
-		// typically assets increase on debit, liabilities increase on credit. We'll simply apply debit + and credit - 
-		// or vice versa depending on your exact accounting convention. Standard convention: Balance = Debit - Credit)
-		
-		// For a purely positive running balance regardless of type (absolute magnitude):
-		// This requires knowing the account type. Let's fetch it.
-		var accType models.AccountType
-		err = tx.QueryRow(ctx, `SELECT account_type FROM ledger_accounts WHERE id = $1`, accountID).Scan(&accType)
-		if err != nil {
-			return fmt.Errorf("fetching account type for %s: %w", entry.AccountCode, err)
-		}
-
+		// Calculate new running balance based on account type.
+		// Assets/Expenses have a normal debit balance, Liabilities/Revenue have a normal credit balance.
 		newBalance := currentBalance
 		switch accType {
 		case models.AccountTypeAsset, models.AccountTypeExpense:

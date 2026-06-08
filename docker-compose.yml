@@ -10,13 +10,18 @@ services:
     environment:
       - SERVER_ENV=development
       - SERVER_PORT=8080
-      - DB_URL=postgres://payment_user:payment_secret@postgres:5432/payment_orchestrator?sslmode=disable
-      - REDIS_URL=redis:6379
-      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-""}
-      - RAZORPAY_KEY_ID=${RAZORPAY_KEY_ID:-""}
-      - RAZORPAY_KEY_SECRET=${RAZORPAY_KEY_SECRET:-""}
-      - DASHBOARD_USERNAME=admin
-      - DASHBOARD_PASSWORD=admin
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=payment_user
+      - DB_PASSWORD=payment_secret
+      - DB_NAME=payment_orchestrator
+      - DB_SSL_MODE=disable
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - API_KEYS=${API_KEYS:-dev-api-key-change-me}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+      - RAZORPAY_KEY_ID=${RAZORPAY_KEY_ID:-}
+      - RAZORPAY_KEY_SECRET=${RAZORPAY_KEY_SECRET:-}
     depends_on:
       postgres:
         condition: service_healthy

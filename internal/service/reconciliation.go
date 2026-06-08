@@ -84,7 +84,11 @@ func (s *ReconciliationService) RunBatchReconciliation(ctx context.Context, psp 
 	for _, rec := range records {
 		totalAmount += rec.Amount
 
-		// Query PSP for current status
+		// Query PSP for current status.
+		// NOTE: This is an N+1 pattern — each payment requires a separate PSP API call.
+		// This is acceptable because: (1) reconciliation runs as a batch job, not in a request path,
+		// (2) most PSPs don't offer bulk status endpoints.
+		// TODO: If PSP supports batch status API, use it to reduce round-trips.
 		pspStatus, err := pspAdapter.GetPaymentStatus(ctx, rec.PSPPaymentID)
 		if err != nil {
 			// PSP record not found — flag discrepancy
@@ -238,9 +242,15 @@ func (s *ReconciliationService) insertDiscrepancy(ctx context.Context, reconID, 
 }
 
 func (s *ReconciliationService) markFailed(ctx context.Context, recordID, errMsg string) {
-	s.db.Exec(ctx, `
+	_, err := s.db.Exec(ctx, `
 		UPDATE reconciliation_records SET status = $1, completed_at = $2 WHERE id = $3
 	`, models.ReconStatusFailed, time.Now().UTC(), recordID)
+	if err != nil {
+		slog.Error("failed to mark reconciliation as failed",
+			slog.String("record_id", recordID),
+			slog.Any("error", err),
+		)
+	}
 }
 
 // normalizePSPStatus maps raw PSP status strings to our internal status.
