@@ -19,8 +19,10 @@ func APIKeyAuth(validKeys []string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if len(validKeys) == 0 {
-				// No keys configured — allow all (development mode)
-				next.ServeHTTP(w, r)
+				// No keys configured — deny all requests (misconfiguration protection)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				w.Write([]byte(`{"success":false,"error":{"code":"UNAUTHORIZED","message":"API authentication not configured"}}`))
 				return
 			}
 
@@ -47,8 +49,7 @@ func APIKeyAuth(validKeys []string) func(http.Handler) http.Handler {
 func extractBearerToken(r *http.Request) string {
 	auth := r.Header.Get("Authorization")
 	if auth == "" {
-		// Also check query param for webhook-style callbacks
-		return r.URL.Query().Get("api_key")
+		return ""
 	}
 
 	parts := strings.SplitN(auth, " ", 2)

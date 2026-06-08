@@ -112,8 +112,8 @@ func (s *DLQService) Retry(ctx context.Context, index int64) error {
 		return fmt.Errorf("dlq unmarshal: %w", err)
 	}
 
-	// Re-process through the webhook service
-	err = s.webhook.IngestWebhook(ctx, entry.PSP, entry.EventType, []byte(entry.Payload), "")
+	// Re-process through the webhook service (skip signature — already verified on first ingestion)
+	err = s.webhook.IngestWebhookRetry(ctx, entry.PSP, entry.EventType, []byte(entry.Payload))
 	if err != nil {
 		return fmt.Errorf("dlq retry failed: %w", err)
 	}

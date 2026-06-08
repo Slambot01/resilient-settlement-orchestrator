@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -58,7 +59,7 @@ func (h *PaymentHandler) GetPayment(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.svc.GetPayment(r.Context(), id)
 	if err != nil {
-		if err.Error() == "payment not found" {
+		if errors.Is(err, service.ErrPaymentNotFound) {
 			response.Error(w, http.StatusNotFound, "NOT_FOUND", "payment not found")
 			return
 		}

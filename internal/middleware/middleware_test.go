@@ -12,7 +12,7 @@ import (
 
 // ---- Auth Middleware Tests ----
 
-func TestAPIKeyAuth_NoKeysConfigured_AllowsAll(t *testing.T) {
+func TestAPIKeyAuth_NoKeysConfigured_DeniesAll(t *testing.T) {
 	handler := APIKeyAuth(nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
@@ -23,8 +23,8 @@ func TestAPIKeyAuth_NoKeysConfigured_AllowsAll(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 when no keys configured, got %d", w.Code)
 	}
 }
 
@@ -78,7 +78,7 @@ func TestAPIKeyAuth_MissingHeader_Returns401(t *testing.T) {
 	}
 }
 
-func TestAPIKeyAuth_QueryParam(t *testing.T) {
+func TestAPIKeyAuth_QueryParam_NoLongerAccepted(t *testing.T) {
 	keys := []string{"query-key-789"}
 	handler := APIKeyAuth(keys)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -89,8 +89,8 @@ func TestAPIKeyAuth_QueryParam(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 (query param auth removed), got %d", w.Code)
 	}
 }
 

@@ -148,7 +148,7 @@ func (s *LedgerService) GetAccountBalance(ctx context.Context, accountCode strin
 
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("account not found: %s", accountCode)
+			return nil, fmt.Errorf("%w: %s", ErrAccountNotFound, accountCode)
 		}
 		return nil, fmt.Errorf("querying account balance: %w", err)
 	}

@@ -135,7 +135,7 @@ func (s *PaymentService) GetPayment(ctx context.Context, id string) (*models.Pay
 
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("payment not found")
+			return nil, ErrPaymentNotFound
 		}
 		return nil, err
 	}
@@ -179,14 +179,17 @@ func (s *PaymentService) updatePaymentState(ctx context.Context, paymentID strin
 
 	now := time.Now().UTC()
 
-	// Update Payment
-	_, err = tx.Exec(ctx, `
+	// Update Payment (optimistic lock: WHERE status = $5)
+	tag, err := tx.Exec(ctx, `
 		UPDATE payments 
 		SET status = $1, psp_payment_id = COALESCE(NULLIF($2, ''), psp_payment_id), updated_at = $3 
 		WHERE id = $4 AND status = $5
 	`, to, pspPaymentID, now, paymentID, from)
 	if err != nil {
 		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("optimistic lock failed: payment %s is no longer in status %s", paymentID, from)
 	}
 
 	// Insert transition
@@ -210,7 +213,7 @@ func (s *PaymentService) CapturePayment(ctx context.Context, id string) (*models
 	}
 
 	if p.Status != models.PaymentStatusAuthorized {
-		return nil, fmt.Errorf("payment not authorized")
+		return nil, ErrNotAuthorized
 	}
 
 	adp, err := s.router.GetAdapter(models.PSPName(p.PSP))
@@ -223,6 +226,12 @@ func (s *PaymentService) CapturePayment(ctx context.Context, id string) (*models
 		return nil, fmt.Errorf("psp capture failed: %w", err)
 	}
 
+	// Update internal state to reflect the capture
+	err = s.updatePaymentState(ctx, id, models.PaymentStatusAuthorized, models.PaymentStatusCaptured, p.PSPPaymentID, "Payment captured via API", "api")
+	if err != nil {
+		return nil, fmt.Errorf("updating capture state: %w", err)
+	}
+
 	return s.GetPayment(ctx, id)
 }
 
@@ -233,6 +242,11 @@ func (s *PaymentService) RefundPayment(ctx context.Context, id string, amount in
 		return nil, err
 	}
 
+	// Only captured or partially refunded payments can be refunded
+	if p.Status != models.PaymentStatusCaptured && p.Status != models.PaymentStatusPartiallyRefunded {
+		return nil, fmt.Errorf("payment must be captured or partially refunded to refund, current status: %s", p.Status)
+	}
+
 	adp, err := s.router.GetAdapter(models.PSPName(p.PSP))
 	if err != nil {
 		return nil, err
@@ -241,6 +255,17 @@ func (s *PaymentService) RefundPayment(ctx context.Context, id string, amount in
 	_, err = adp.RefundPayment(ctx, p.PSPPaymentID, amount)
 	if err != nil {
 		return nil, fmt.Errorf("psp refund failed: %w", err)
+	}
+
+	// Determine new status: full refund vs partial refund
+	newStatus := models.PaymentStatusRefunded
+	if amount < p.Amount {
+		newStatus = models.PaymentStatusPartiallyRefunded
+	}
+
+	err = s.updatePaymentState(ctx, id, p.Status, newStatus, p.PSPPaymentID, "Payment refunded via API", "api")
+	if err != nil {
+		return nil, fmt.Errorf("updating refund state: %w", err)
 	}
 
 	return s.GetPayment(ctx, id)
@@ -254,7 +279,7 @@ func (s *PaymentService) CancelPayment(ctx context.Context, id string) (*models.
 	}
 
 	if p.Status != models.PaymentStatusAuthorized {
-		return nil, fmt.Errorf("payment not authorized")
+		return nil, ErrNotAuthorized
 	}
 
 	adp, err := s.router.GetAdapter(models.PSPName(p.PSP))

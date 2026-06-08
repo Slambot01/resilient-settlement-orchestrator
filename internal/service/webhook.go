@@ -29,17 +29,34 @@ func NewWebhookService(db *pgxpool.Pool, ledger *LedgerService, adapters map[str
 	}
 }
 
+// IngestWebhookRetry re-processes a webhook from the DLQ without signature verification.
+// The payload was already verified on first ingestion; re-verification would fail because
+// the original signature is not stored in the DLQ entry.
+func (s *WebhookService) IngestWebhookRetry(ctx context.Context, psp, eventType string, payload []byte) error {
+	_, ok := s.adapters[psp]
+	if !ok {
+		return fmt.Errorf("unknown psp: %s", psp)
+	}
+	return s.ingestWebhookInternal(ctx, psp, eventType, payload, "", true)
+}
+
 // IngestWebhook validates, deduplicates, and processes an incoming webhook.
 // Returns nil if the event was already processed (idempotent).
 func (s *WebhookService) IngestWebhook(ctx context.Context, psp, eventType string, payload []byte, signature string) error {
-	// 1. Verify signature
+	return s.ingestWebhookInternal(ctx, psp, eventType, payload, signature, false)
+}
+
+func (s *WebhookService) ingestWebhookInternal(ctx context.Context, psp, eventType string, payload []byte, signature string, skipSigVerify bool) error {
+	// 1. Verify signature (unless this is a DLQ retry)
 	pspAdapter, ok := s.adapters[psp]
 	if !ok {
 		return fmt.Errorf("unknown psp: %s", psp)
 	}
 
-	if err := pspAdapter.VerifyWebhookSignature(payload, signature); err != nil {
-		return fmt.Errorf("signature verification failed: %w", err)
+	if !skipSigVerify {
+		if err := pspAdapter.VerifyWebhookSignature(payload, signature); err != nil {
+			return fmt.Errorf("signature verification failed: %w", err)
+		}
 	}
 
 	// 2. Build idempotency key from PSP + raw payload hash

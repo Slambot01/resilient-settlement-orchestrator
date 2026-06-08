@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -29,7 +30,7 @@ func (h *LedgerHandler) GetAccountBalance(w http.ResponseWriter, r *http.Request
 
 	res, err := h.svc.GetAccountBalance(r.Context(), code)
 	if err != nil {
-		if err.Error() == "account not found: "+code {
+		if errors.Is(err, service.ErrAccountNotFound) {
 			response.Error(w, http.StatusNotFound, "NOT_FOUND", "account not found")
 			return
 		}

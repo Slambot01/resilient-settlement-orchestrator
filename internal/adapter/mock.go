@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/rand"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -31,6 +32,7 @@ func DefaultMockConfig() MockConfig {
 
 type MockPSP struct {
 	cfg MockConfig
+	mu  sync.Mutex
 	rng *rand.Rand
 }
 
@@ -124,10 +126,14 @@ func (m *MockPSP) simulateLatency() {
 	if spread <= 0 {
 		return
 	}
+	m.mu.Lock()
 	delay := m.cfg.LatencyMin + time.Duration(m.rng.Int63n(int64(spread)))
+	m.mu.Unlock()
 	time.Sleep(delay)
 }
 
 func (m *MockPSP) shouldSucceed() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.rng.Float64() < m.cfg.SuccessRate
 }
