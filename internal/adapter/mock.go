@@ -62,7 +62,7 @@ func (m *MockPSP) CreatePayment(ctx context.Context, req PSPPaymentRequest) (*PS
 	}, nil
 }
 
-func (m *MockPSP) CapturePayment(ctx context.Context, pspPaymentID string, amount int64) (*PSPCaptureResponse, error) {
+func (m *MockPSP) CapturePayment(ctx context.Context, pspPaymentID string, amount int64, currency string) (*PSPCaptureResponse, error) {
 	m.simulateLatency()
 
 	if !m.shouldSucceed() {

@@ -43,7 +43,7 @@ func Idempotency(rdb *redis.Client) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Skip if Redis is unavailable
+			// Skip idempotency if Redis is not configured at all (dev/test mode only)
 			if rdb == nil {
 				next.ServeHTTP(w, r)
 				return
@@ -61,8 +61,13 @@ func Idempotency(rdb *redis.Client) func(http.Handler) http.Handler {
 			// Atomic claim: SET key "processing" NX EX ttl
 			claimed, err := rdb.SetNX(ctx, redisKey, processingMarker, idempotencyTTL).Result()
 			if err != nil {
-				slog.Warn("idempotency: redis error, proceeding without check", slog.Any("error", err))
-				next.ServeHTTP(w, r)
+				// V-012 fix: fail-closed — reject the request instead of silently proceeding
+				// without idempotency. This prevents double-charges during Redis outages.
+				slog.Error("idempotency: redis unavailable, rejecting request to prevent duplicates",
+					slog.Any("error", err), slog.String("key", key))
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusServiceUnavailable)
+				w.Write([]byte(`{"success":false,"error":{"code":"SERVICE_UNAVAILABLE","message":"idempotency service temporarily unavailable, please retry"}}`))
 				return
 			}
 

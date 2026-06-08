@@ -57,6 +57,13 @@ func (s *WebhookService) ingestWebhookInternal(ctx context.Context, psp, eventTy
 		if err := pspAdapter.VerifyWebhookSignature(payload, signature); err != nil {
 			return fmt.Errorf("signature verification failed: %w", err)
 		}
+
+		// V-013: Reject stale webhooks to prevent replay attacks (5-minute window)
+		if err := validateWebhookFreshness(payload); err != nil {
+			slog.Warn("webhook rejected: stale timestamp",
+				slog.String("psp", psp), slog.Any("error", err))
+			return fmt.Errorf("webhook replay rejected: %w", err)
+		}
 	}
 
 	// 2. Build idempotency key from PSP + raw payload hash
@@ -460,4 +467,60 @@ func nilIfEmpty(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// webhookMaxAge is the maximum age of a webhook before it's rejected as stale.
+const webhookMaxAge = 5 * time.Minute
+
+// validateWebhookFreshness extracts the timestamp from a webhook payload and rejects
+// events older than webhookMaxAge. Supports multiple PSP timestamp formats:
+//   - Stripe: "created" (unix epoch seconds)
+//   - Razorpay: "created_at" (unix epoch seconds)
+//   - Mock/generic: "timestamp" (RFC3339 string)
+//
+// If no timestamp field is found, the webhook is accepted (best-effort).
+func validateWebhookFreshness(payload []byte) error {
+	var data map[string]interface{}
+	if err := json.Unmarshal(payload, &data); err != nil {
+		return nil // can't parse — let signature verification handle it
+	}
+
+	var eventTime time.Time
+
+	// Stripe format: "created" is a unix epoch
+	if created, ok := data["created"].(float64); ok && created > 0 {
+		eventTime = time.Unix(int64(created), 0)
+	}
+
+	// Razorpay format: "created_at" is a unix epoch
+	if eventTime.IsZero() {
+		if createdAt, ok := data["created_at"].(float64); ok && createdAt > 0 {
+			eventTime = time.Unix(int64(createdAt), 0)
+		}
+	}
+
+	// Mock/generic format: "timestamp" is an RFC3339 string
+	if eventTime.IsZero() {
+		if ts, ok := data["timestamp"].(string); ok && ts != "" {
+			if t, err := time.Parse(time.RFC3339, ts); err == nil {
+				eventTime = t
+			}
+		}
+	}
+
+	// If no timestamp found, accept (best-effort — not all webhook types include timestamps)
+	if eventTime.IsZero() {
+		return nil
+	}
+
+	age := time.Since(eventTime)
+	if age > webhookMaxAge {
+		return fmt.Errorf("webhook timestamp is %v old (max allowed: %v)", age.Round(time.Second), webhookMaxAge)
+	}
+	// Also reject future-dated webhooks (clock skew > 1 minute)
+	if age < -1*time.Minute {
+		return fmt.Errorf("webhook timestamp is %v in the future", (-age).Round(time.Second))
+	}
+
+	return nil
 }

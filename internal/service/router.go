@@ -50,6 +50,18 @@ func (r *PaymentRouter) GetAdapter(name models.PSPName) (adapter.PSPAdapter, err
 	return adp, nil
 }
 
+// GetAdapters returns a string-keyed map of all registered PSP adapters.
+// Used by webhook and reconciliation services for PSP lookup.
+func (r *PaymentRouter) GetAdapters() map[string]adapter.PSPAdapter {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	result := make(map[string]adapter.PSPAdapter, len(r.adapters))
+	for name, adp := range r.adapters {
+		result[string(name)] = adp
+	}
+	return result
+}
+
 // RecordSuccess signals a successful PSP call to the circuit breaker.
 func (r *PaymentRouter) RecordSuccess(psp models.PSPName) {
 	r.mu.RLock()

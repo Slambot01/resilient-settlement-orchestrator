@@ -1,13 +1,18 @@
 package middleware
 
 import (
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
 )
 
 // RateLimiter provides a simple in-memory token bucket rate limiter per IP.
-// For production multi-instance deployments, replace with a Redis-based limiter.
+//
+// WARNING (V-011): This limiter is per-process. In multi-pod Kubernetes deployments,
+// each pod has independent rate state, so an attacker hitting N pods gets N× the limit.
+// For production multi-instance deployments, replace with a Redis-based distributed
+// limiter (e.g., go-redis/redis_rate using GCRA algorithm).
 type RateLimiter struct {
 	mu       sync.Mutex
 	visitors map[string]*bucket
@@ -24,6 +29,9 @@ type bucket struct {
 // NewRateLimiter creates a rate limiter.
 // rate: requests allowed per interval. burst: max burst capacity.
 func NewRateLimiter(rate int, interval time.Duration, burst int) *RateLimiter {
+	slog.Warn("using in-memory rate limiter — not suitable for multi-pod deployments (V-011)",
+		slog.Int("rate", rate), slog.Int("burst", burst))
+
 	rl := &RateLimiter{
 		visitors: make(map[string]*bucket),
 		rate:     rate,

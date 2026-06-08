@@ -79,18 +79,24 @@ func main() {
 
 	paymentRouter := service.NewPaymentRouter()
 	
-	// Register Mock PSP
-	mockPSP := adapter.NewMockPSP(adapter.DefaultMockConfig())
-	paymentRouter.RegisterAdapter(models.PSPMock, mockPSP)
-	
-	// Set default rule to route everything to Mock PSP for now
-	paymentRouter.LoadRules([]models.RoutingRule{
-		{
-			Name:       "default_mock_rule",
-			PrimaryPSP: models.PSPMock,
-			Priority:   100,
-		},
-	})
+	// Register Mock PSP only in non-production environments (V-014 fix)
+	// Mock PSP has a hardcoded webhook secret — never expose in production
+	if cfg.Server.Env != "production" {
+		mockPSP := adapter.NewMockPSP(adapter.DefaultMockConfig())
+		paymentRouter.RegisterAdapter(models.PSPMock, mockPSP)
+
+		// Set default rule to route everything to Mock PSP for dev/test
+		paymentRouter.LoadRules([]models.RoutingRule{
+			{
+				Name:       "default_mock_rule",
+				PrimaryPSP: models.PSPMock,
+				Priority:   100,
+			},
+		})
+		logger.Info("mock PSP registered (non-production mode)")
+	} else {
+		logger.Info("mock PSP disabled in production environment")
+	}
 
 	// ── Connect to Google Cloud Pub/Sub ─────────────────────────────
 	var pubsubClient *appPubSub.Client
@@ -122,9 +128,8 @@ func main() {
 	paymentService := service.NewPaymentService(dbPool, paymentRouter, ledgerService, pubsubClient)
 
 	// PSP adapter registry for webhook signature verification
-	pspAdapters := map[string]adapter.PSPAdapter{
-		"mock": mockPSP,
-	}
+	// Built dynamically from registered adapters (mock only registered in non-prod)
+	pspAdapters := paymentRouter.GetAdapters()
 	webhookService := service.NewWebhookService(dbPool, ledgerService, pspAdapters)
 	reconService := service.NewReconciliationService(dbPool, pspAdapters)
 	dlqService := service.NewDLQService(redisClient, webhookService)

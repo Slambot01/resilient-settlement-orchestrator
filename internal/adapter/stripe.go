@@ -61,7 +61,7 @@ func (s *StripeAdapter) CreatePayment(ctx context.Context, req PSPPaymentRequest
 	}, nil
 }
 
-func (s *StripeAdapter) CapturePayment(ctx context.Context, pspPaymentID string, amount int64) (*PSPCaptureResponse, error) {
+func (s *StripeAdapter) CapturePayment(ctx context.Context, pspPaymentID string, amount int64, currency string) (*PSPCaptureResponse, error) {
 	params := &stripe.PaymentIntentCaptureParams{}
 	if amount > 0 {
 		params.AmountToCapture = stripe.Int64(amount)

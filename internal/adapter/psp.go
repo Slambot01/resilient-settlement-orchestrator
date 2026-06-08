@@ -45,7 +45,7 @@ type PSPAdapter interface {
 	Name() string
 
 	CreatePayment(ctx context.Context, req PSPPaymentRequest) (*PSPPaymentResponse, error)
-	CapturePayment(ctx context.Context, pspPaymentID string, amount int64) (*PSPCaptureResponse, error)
+	CapturePayment(ctx context.Context, pspPaymentID string, amount int64, currency string) (*PSPCaptureResponse, error)
 	RefundPayment(ctx context.Context, pspPaymentID string, amount int64) (*PSPRefundResponse, error)
 	CancelPayment(ctx context.Context, pspPaymentID string) error
 	GetPaymentStatus(ctx context.Context, pspPaymentID string) (*PSPStatusResponse, error)

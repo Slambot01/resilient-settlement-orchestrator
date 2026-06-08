@@ -36,13 +36,24 @@ func (h *PaymentHandler) CreatePayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Basic validation (in a real app, use the validator library here)
+	// Input validation
 	if req.Amount <= 0 {
 		response.Error(w, http.StatusBadRequest, "VALIDATION_FAILED", "amount must be greater than zero")
 		return
 	}
+	// V-016: prevent integer overflow in ledger aggregates (max ~₹9.99B / $9.99B in minor units)
+	const maxAmount int64 = 999_999_999_999
+	if req.Amount > maxAmount {
+		response.Error(w, http.StatusBadRequest, "VALIDATION_FAILED", "amount exceeds maximum allowed value")
+		return
+	}
 	if req.Currency == "" || req.OrderID == "" || req.MerchantID == "" {
 		response.Error(w, http.StatusBadRequest, "VALIDATION_FAILED", "currency, order_id, and merchant_id are required")
+		return
+	}
+	// V-015: validate currency against supported ISO 4217 codes
+	if !isValidCurrency(req.Currency) {
+		response.Error(w, http.StatusBadRequest, "VALIDATION_FAILED", "unsupported currency; must be a valid ISO 4217 code (e.g., INR, USD, EUR)")
 		return
 	}
 
@@ -143,6 +154,11 @@ func (h *PaymentHandler) RefundPayment(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusBadRequest, "VALIDATION_FAILED", "amount must be greater than zero")
 		return
 	}
+	const maxRefundAmount int64 = 999_999_999_999
+	if req.Amount > maxRefundAmount {
+		response.Error(w, http.StatusBadRequest, "VALIDATION_FAILED", "refund amount exceeds maximum allowed value")
+		return
+	}
 
 	// Ownership check: fetch first, verify merchant, then refund
 	existing, err := h.svc.GetPayment(r.Context(), id)
@@ -202,4 +218,23 @@ func (h *PaymentHandler) CancelPayment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.JSON(w, http.StatusOK, res)
+}
+
+// supportedCurrencies is the allowlist of ISO 4217 currency codes this system supports.
+// Add currencies here as PSP integrations expand.
+var supportedCurrencies = map[string]bool{
+	"INR": true, // Indian Rupee
+	"USD": true, // US Dollar
+	"EUR": true, // Euro
+	"GBP": true, // British Pound
+	"SGD": true, // Singapore Dollar
+	"AUD": true, // Australian Dollar
+	"CAD": true, // Canadian Dollar
+	"JPY": true, // Japanese Yen
+	"AED": true, // UAE Dirham
+	"MYR": true, // Malaysian Ringgit
+}
+
+func isValidCurrency(code string) bool {
+	return supportedCurrencies[code]
 }

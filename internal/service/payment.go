@@ -221,30 +221,68 @@ func (s *PaymentService) updatePaymentState(ctx context.Context, paymentID strin
 }
 
 // CapturePayment captures an authorized payment.
+// Uses SELECT FOR UPDATE to prevent concurrent capture race conditions (V-019 fix).
 func (s *PaymentService) CapturePayment(ctx context.Context, id string) (*models.PaymentResponse, error) {
-	p, err := s.GetPayment(ctx, id)
+	// Start transaction — need row lock before PSP call
+	tx, err := s.db.Begin(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// Lock the payment row to prevent concurrent captures
+	var p models.Payment
+	err = tx.QueryRow(ctx, `
+		SELECT id, merchant_id, order_id, amount, currency, status, psp, psp_payment_id
+		FROM payments WHERE id = $1 FOR UPDATE
+	`, id).Scan(&p.ID, &p.MerchantID, &p.OrderID, &p.Amount, &p.Currency, &p.Status, &p.PSP, &p.PSPPaymentID)
+	if err != nil {
+		return nil, ErrPaymentNotFound
 	}
 
 	if p.Status != models.PaymentStatusAuthorized {
 		return nil, ErrNotAuthorized
 	}
 
+	// Call PSP under row lock — prevents double-capture at PSP level
 	adp, err := s.router.GetAdapter(models.PSPName(p.PSP))
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = adp.CapturePayment(ctx, p.PSPPaymentID, p.Amount)
+	_, err = adp.CapturePayment(ctx, p.PSPPaymentID, p.Amount, p.Currency)
 	if err != nil {
 		return nil, fmt.Errorf("psp capture failed: %w", err)
 	}
 
-	// Update internal state to reflect the capture
-	err = s.updatePaymentState(ctx, id, models.PaymentStatusAuthorized, models.PaymentStatusCaptured, p.PSPPaymentID, "Payment captured via API", "api")
+	now := time.Now().UTC()
+
+	// Update status atomically
+	_, err = tx.Exec(ctx, `
+		UPDATE payments SET status = $1, updated_at = $2 WHERE id = $3
+	`, models.PaymentStatusCaptured, now, id)
 	if err != nil {
 		return nil, fmt.Errorf("updating capture state: %w", err)
+	}
+
+	// Record state transition
+	transitionID := uuid.NewString()
+	_, err = tx.Exec(ctx, `
+		INSERT INTO payment_state_transitions (id, payment_id, from_status, to_status, reason, triggered_by, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, transitionID, id, models.PaymentStatusAuthorized, models.PaymentStatusCaptured,
+		"Payment captured via API", "api", now)
+	if err != nil {
+		return nil, fmt.Errorf("recording capture transition: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit capture tx: %w", err)
+	}
+
+	// Publish event (fire-and-forget, after commit)
+	if s.pubsub != nil {
+		s.pubsub.PublishPaymentEvent(ctx, id, string(models.PaymentStatusAuthorized), string(models.PaymentStatusCaptured), "api")
 	}
 
 	return s.GetPayment(ctx, id)

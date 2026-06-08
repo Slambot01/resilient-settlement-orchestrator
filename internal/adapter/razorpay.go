@@ -54,9 +54,9 @@ func (r *RazorpayAdapter) CreatePayment(ctx context.Context, req PSPPaymentReque
 	}, nil
 }
 
-func (r *RazorpayAdapter) CapturePayment(ctx context.Context, pspPaymentID string, amount int64) (*PSPCaptureResponse, error) {
+func (r *RazorpayAdapter) CapturePayment(ctx context.Context, pspPaymentID string, amount int64, currency string) (*PSPCaptureResponse, error) {
 	extra := map[string]interface{}{
-		"currency": "INR",
+		"currency": currency, // V-018 fix: use actual payment currency instead of hardcoded INR
 	}
 
 	body, err := r.client.Payment.Capture(pspPaymentID, int(amount), extra, nil)
