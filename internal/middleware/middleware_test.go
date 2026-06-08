@@ -29,7 +29,7 @@ func TestAPIKeyAuth_NoKeysConfigured_DeniesAll(t *testing.T) {
 }
 
 func TestAPIKeyAuth_ValidBearerToken(t *testing.T) {
-	keys := []string{"secret-key-123", "backup-key-456"}
+	keys := ParseMerchantKeys([]string{"secret-key-123", "backup-key-456"})
 	handler := APIKeyAuth(keys)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -46,7 +46,7 @@ func TestAPIKeyAuth_ValidBearerToken(t *testing.T) {
 }
 
 func TestAPIKeyAuth_InvalidToken_Returns403(t *testing.T) {
-	keys := []string{"valid-key"}
+	keys := ParseMerchantKeys([]string{"valid-key"})
 	handler := APIKeyAuth(keys)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("handler should not be called")
 	}))
@@ -63,7 +63,7 @@ func TestAPIKeyAuth_InvalidToken_Returns403(t *testing.T) {
 }
 
 func TestAPIKeyAuth_MissingHeader_Returns401(t *testing.T) {
-	keys := []string{"valid-key"}
+	keys := ParseMerchantKeys([]string{"valid-key"})
 	handler := APIKeyAuth(keys)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("handler should not be called")
 	}))
@@ -79,7 +79,7 @@ func TestAPIKeyAuth_MissingHeader_Returns401(t *testing.T) {
 }
 
 func TestAPIKeyAuth_QueryParam_NoLongerAccepted(t *testing.T) {
-	keys := []string{"query-key-789"}
+	keys := ParseMerchantKeys([]string{"query-key-789"})
 	handler := APIKeyAuth(keys)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -95,7 +95,7 @@ func TestAPIKeyAuth_QueryParam_NoLongerAccepted(t *testing.T) {
 }
 
 func TestAPIKeyAuth_MalformedAuthHeader(t *testing.T) {
-	keys := []string{"valid-key"}
+	keys := ParseMerchantKeys([]string{"valid-key"})
 	handler := APIKeyAuth(keys)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("handler should not be called")
 	}))
@@ -112,7 +112,7 @@ func TestAPIKeyAuth_MalformedAuthHeader(t *testing.T) {
 }
 
 func TestAPIKeyAuth_BackupKey(t *testing.T) {
-	keys := []string{"primary-key", "backup-key"}
+	keys := ParseMerchantKeys([]string{"primary-key", "backup-key"})
 	handler := APIKeyAuth(keys)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -125,6 +125,28 @@ func TestAPIKeyAuth_BackupKey(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200 with backup key, got %d", w.Code)
+	}
+}
+
+func TestAPIKeyAuth_MerchantScopedKey_SetsContext(t *testing.T) {
+	keys := ParseMerchantKeys([]string{"merchant_abc:sk_test_123"})
+	var capturedMerchant string
+	handler := APIKeyAuth(keys)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedMerchant = MerchantIDFromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/payments", nil)
+	req.Header.Set("Authorization", "Bearer sk_test_123")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+	if capturedMerchant != "merchant_abc" {
+		t.Errorf("expected merchant_id 'merchant_abc' in context, got %q", capturedMerchant)
 	}
 }
 

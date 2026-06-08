@@ -150,6 +150,11 @@ func main() {
 	dlqHandler := handler.NewDLQHandler(dlqService)
 	dashboardHandler := handler.NewDashboardHandler(dashboardService)
 
+	// ── Parse merchant-scoped API keys ──────────────────────────────
+	// Format: "merchantID:apiKey" e.g. "merchant_abc:sk_live_xxx"
+	// Legacy format (no colon): treated as admin key
+	merchantKeys := middleware.ParseMerchantKeys(cfg.Auth.APIKeys)
+
 	// ── Create router ───────────────────────────────────────────────
 	r := chi.NewRouter()
 
@@ -179,7 +184,7 @@ func main() {
 		
 		// Payment routes — protected by API key
 		r.Route("/payments", func(r chi.Router) {
-			r.Use(middleware.APIKeyAuth(cfg.Auth.APIKeys))
+			r.Use(middleware.APIKeyAuth(merchantKeys))
 			r.Use(middleware.Idempotency(redisClient))
 			r.Post("/", paymentHandler.CreatePayment)
 			r.Get("/{id}", paymentHandler.GetPayment)
@@ -190,7 +195,7 @@ func main() {
 		
 		// Ledger routes — protected by API key
 		r.Route("/ledger", func(r chi.Router) {
-			r.Use(middleware.APIKeyAuth(cfg.Auth.APIKeys))
+			r.Use(middleware.APIKeyAuth(merchantKeys))
 			r.Get("/accounts/{code}/balance", ledgerHandler.GetAccountBalance)
 			r.Get("/entries", ledgerHandler.GetRecentEntries)
 		})
@@ -200,7 +205,7 @@ func main() {
 
 		// Admin routes — protected by API key
 		r.Route("/admin", func(r chi.Router) {
-			r.Use(middleware.APIKeyAuth(cfg.Auth.APIKeys))
+			r.Use(middleware.APIKeyAuth(merchantKeys))
 
 			r.Route("/reconciliation", func(r chi.Router) {
 				r.Post("/{psp}", reconHandler.TriggerReconciliation)

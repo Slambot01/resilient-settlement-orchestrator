@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Slambot01/resilient-settlement-orchestrator/internal/middleware"
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/models"
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/pkg/response"
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/service"
@@ -45,6 +46,13 @@ func (h *PaymentHandler) CreatePayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Multi-tenant enforcement: non-admin merchants can only create payments for themselves
+	authMerchant := middleware.MerchantIDFromContext(r.Context())
+	if !middleware.IsAdmin(r.Context()) && req.MerchantID != authMerchant {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "cannot create payments for a different merchant")
+		return
+	}
+
 	res, err := h.svc.CreatePayment(r.Context(), req)
 	if err != nil {
 		slog.Error("failed to create payment", slog.Any("error", err))
@@ -74,6 +82,12 @@ func (h *PaymentHandler) GetPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Multi-tenant enforcement: non-admin merchants can only view their own payments
+	if !middleware.IsAdmin(r.Context()) && res.MerchantID != middleware.MerchantIDFromContext(r.Context()) {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "payment not found")
+		return
+	}
+
 	response.JSON(w, http.StatusOK, res)
 }
 
@@ -82,6 +96,22 @@ func (h *PaymentHandler) CapturePayment(w http.ResponseWriter, r *http.Request) 
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		response.Error(w, http.StatusBadRequest, "INVALID_REQUEST", "payment ID is required")
+		return
+	}
+
+	// Ownership check: fetch first, verify merchant, then capture
+	existing, err := h.svc.GetPayment(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, service.ErrPaymentNotFound) {
+			response.Error(w, http.StatusNotFound, "NOT_FOUND", "payment not found")
+			return
+		}
+		slog.Error("failed to fetch payment for capture", slog.Any("error", err), slog.String("payment_id", id))
+		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to capture payment")
+		return
+	}
+	if !middleware.IsAdmin(r.Context()) && existing.MerchantID != middleware.MerchantIDFromContext(r.Context()) {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "payment not found")
 		return
 	}
 
@@ -114,6 +144,22 @@ func (h *PaymentHandler) RefundPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Ownership check: fetch first, verify merchant, then refund
+	existing, err := h.svc.GetPayment(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, service.ErrPaymentNotFound) {
+			response.Error(w, http.StatusNotFound, "NOT_FOUND", "payment not found")
+			return
+		}
+		slog.Error("failed to fetch payment for refund", slog.Any("error", err), slog.String("payment_id", id))
+		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to refund payment")
+		return
+	}
+	if !middleware.IsAdmin(r.Context()) && existing.MerchantID != middleware.MerchantIDFromContext(r.Context()) {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "payment not found")
+		return
+	}
+
 	res, err := h.svc.RefundPayment(r.Context(), id, req.Amount)
 	if err != nil {
 		slog.Error("failed to refund payment", slog.Any("error", err), slog.String("payment_id", id))
@@ -129,6 +175,22 @@ func (h *PaymentHandler) CancelPayment(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		response.Error(w, http.StatusBadRequest, "INVALID_REQUEST", "payment ID is required")
+		return
+	}
+
+	// Ownership check: fetch first, verify merchant, then cancel
+	existing, err := h.svc.GetPayment(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, service.ErrPaymentNotFound) {
+			response.Error(w, http.StatusNotFound, "NOT_FOUND", "payment not found")
+			return
+		}
+		slog.Error("failed to fetch payment for cancel", slog.Any("error", err), slog.String("payment_id", id))
+		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to cancel payment")
+		return
+	}
+	if !middleware.IsAdmin(r.Context()) && existing.MerchantID != middleware.MerchantIDFromContext(r.Context()) {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "payment not found")
 		return
 	}
 
