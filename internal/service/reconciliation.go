@@ -77,6 +77,10 @@ func (s *ReconciliationService) RunBatchReconciliation(ctx context.Context, psp 
 		}
 		records = append(records, r)
 	}
+	if err := rows.Err(); err != nil {
+		s.markFailed(ctx, recordID, err.Error())
+		return nil, fmt.Errorf("iterating payment records: %w", err)
+	}
 
 	var totalAmount int64
 	var matched, discrepancies int
@@ -222,6 +226,9 @@ func (s *ReconciliationService) GetDiscrepancies(ctx context.Context, reconID st
 			return nil, err
 		}
 		result = append(result, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating discrepancies: %w", err)
 	}
 	return result, nil
 }

@@ -158,6 +158,9 @@ func (s *PaymentService) GetPayment(ctx context.Context, id string) (*models.Pay
 		}
 		transitions = append(transitions, t)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating state transitions: %w", err)
+	}
 
 	return &models.PaymentResponse{
 		Payment:          p,

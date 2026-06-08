@@ -162,7 +162,7 @@ type LedgerEntryRow struct {
 }
 
 // GetRecentEntries returns the most recent ledger entries with account info.
-func (s *LedgerService) GetRecentEntries(ctx context.Context, limit int) ([]LedgerEntryRow, error) {
+func (s *LedgerService) GetRecentEntries(ctx context.Context, limit, offset int) ([]LedgerEntryRow, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT e.id, e.transaction_id, a.account_code, a.account_name,
 			e.debit, e.credit, e.running_balance, e.description,
@@ -171,8 +171,8 @@ func (s *LedgerService) GetRecentEntries(ctx context.Context, limit int) ([]Ledg
 		JOIN ledger_accounts a ON a.id = e.account_id
 		JOIN ledger_transactions t ON t.id = e.transaction_id
 		ORDER BY e.created_at DESC
-		LIMIT $1
-	`, limit)
+		LIMIT $1 OFFSET $2
+	`, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("querying ledger entries: %w", err)
 	}
@@ -187,6 +187,9 @@ func (s *LedgerService) GetRecentEntries(ctx context.Context, limit int) ([]Ledg
 			return nil, err
 		}
 		result = append(result, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating ledger entries: %w", err)
 	}
 
 	return result, nil

@@ -95,7 +95,9 @@ func (s *DashboardService) GetStats(ctx context.Context, from, to time.Time) (*D
 		}
 		stats.StatusBreakdown[status] = count
 	}
-
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating status breakdown: %w", err)
+	}
 	// Currency breakdown (total volume per currency)
 	rows, err = s.db.Query(ctx, `
 		SELECT currency, COALESCE(SUM(amount), 0)
@@ -116,7 +118,9 @@ func (s *DashboardService) GetStats(ctx context.Context, from, to time.Time) (*D
 		}
 		stats.CurrencyBreakdown[currency] = total
 	}
-
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating currency breakdown: %w", err)
+	}
 	// PSP breakdown (count per PSP)
 	rows, err = s.db.Query(ctx, `
 		SELECT psp, COUNT(*)
@@ -137,7 +141,9 @@ func (s *DashboardService) GetStats(ctx context.Context, from, to time.Time) (*D
 		}
 		stats.PSPBreakdown[psp] = count
 	}
-
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating PSP breakdown: %w", err)
+	}
 	// Today's stats
 	todayStart := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 0, 0, 0, 0, time.UTC)
 	todayEnd := todayStart.Add(24 * time.Hour)
@@ -185,6 +191,9 @@ func (s *DashboardService) GetDailyVolume(ctx context.Context, from, to time.Tim
 		d.Date = day.Format("2006-01-02")
 		result = append(result, d)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating daily volume: %w", err)
+	}
 
 	return result, nil
 }
@@ -231,7 +240,9 @@ func (s *DashboardService) GetPSPHealth(ctx context.Context) ([]PSPHealth, error
 		}
 		dbMetrics[psp] = [3]int{total, captured, failed}
 	}
-
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating PSP metrics: %w", err)
+	}
 	// Merge circuit breaker stats with DB metrics
 	seen := make(map[string]bool)
 	var result []PSPHealth
@@ -320,7 +331,9 @@ func (s *DashboardService) GetRecentPayments(ctx context.Context, offset, limit 
 		}
 		result = append(result, p)
 	}
-
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterating recent payments: %w", err)
+	}
 	return result, total, nil
 }
 
@@ -368,6 +381,9 @@ func (s *DashboardService) GetActivityFeed(ctx context.Context, limit int) ([]Ac
 			return nil, err
 		}
 		result = append(result, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating activity feed: %w", err)
 	}
 
 	return result, nil

@@ -2,9 +2,11 @@ package retry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
+	"math/rand"
 	"time"
 )
 
@@ -75,9 +77,11 @@ func Do(ctx context.Context, cfg Config, operationName string, fn RetryableFunc)
 func backoffDuration(attempt int, cfg Config) time.Duration {
 	wait := float64(cfg.InitialWait) * math.Pow(cfg.Multiplier, float64(attempt))
 	if time.Duration(wait) > cfg.MaxWait {
-		return cfg.MaxWait
+		wait = float64(cfg.MaxWait)
 	}
-	return time.Duration(wait)
+	// Add ±25% jitter to prevent thundering herd
+	jitter := 1.0 + (rand.Float64()-0.5)*0.5 // 0.75 to 1.25
+	return time.Duration(wait * jitter)
 }
 
 // nonRetryableError wraps errors that should not be retried.
@@ -96,20 +100,5 @@ func NonRetryable(err error) error {
 
 func IsNonRetryable(err error) bool {
 	target := &nonRetryableError{}
-	return errorAs(err, &target)
-}
-
-// errorAs is a simple errors.As without importing errors package
-func errorAs(err error, target interface{}) bool {
-	if err == nil {
-		return false
-	}
-	if e, ok := err.(*nonRetryableError); ok {
-		*target.(**nonRetryableError) = e
-		return true
-	}
-	if u, ok := err.(interface{ Unwrap() error }); ok {
-		return errorAs(u.Unwrap(), target)
-	}
-	return false
+	return errors.As(err, &target)
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 // Config holds all application configuration.
@@ -132,34 +133,11 @@ func getEnvSlice(key string) []string {
 		return nil
 	}
 	var result []string
-	for _, k := range splitComma(value) {
-		k = trimSpace(k)
+	for _, k := range strings.Split(value, ",") {
+		k = strings.TrimSpace(k)
 		if k != "" {
 			result = append(result, k)
 		}
 	}
 	return result
-}
-
-func splitComma(s string) []string {
-	result := []string{}
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == ',' {
-			result = append(result, s[start:i])
-			start = i + 1
-		}
-	}
-	result = append(result, s[start:])
-	return result
-}
-
-func trimSpace(s string) string {
-	for len(s) > 0 && s[0] == ' ' {
-		s = s[1:]
-	}
-	for len(s) > 0 && s[len(s)-1] == ' ' {
-		s = s[:len(s)-1]
-	}
-	return s
 }

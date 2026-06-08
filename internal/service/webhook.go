@@ -281,7 +281,9 @@ func (s *WebhookService) processRefundWebhook(ctx context.Context, paymentID str
 
 	// Extract refund amount from payload
 	var parsed map[string]interface{}
-	json.Unmarshal(payload, &parsed)
+	if err := json.Unmarshal(payload, &parsed); err != nil {
+		return fmt.Errorf("parsing refund webhook payload: %w", err)
+	}
 
 	refundAmount := extractRefundAmount(parsed)
 	if refundAmount <= 0 {

@@ -6,7 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"sync"
 	"time"
 
@@ -39,7 +39,7 @@ type MockPSP struct {
 func NewMockPSP(cfg MockConfig) *MockPSP {
 	return &MockPSP{
 		cfg: cfg,
-		rng: rand.New(rand.NewSource(time.Now().UnixNano())),
+		rng: rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), uint64(time.Now().UnixNano()>>32))),
 	}
 }
 
@@ -127,7 +127,7 @@ func (m *MockPSP) simulateLatency() {
 		return
 	}
 	m.mu.Lock()
-	delay := m.cfg.LatencyMin + time.Duration(m.rng.Int63n(int64(spread)))
+	delay := m.cfg.LatencyMin + time.Duration(m.rng.Int64N(int64(spread)))
 	m.mu.Unlock()
 	time.Sleep(delay)
 }
