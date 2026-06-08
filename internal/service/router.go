@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/adapter"
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/models"
@@ -11,6 +12,7 @@ import (
 )
 
 type PaymentRouter struct {
+	mu       sync.RWMutex
 	adapters map[models.PSPName]adapter.PSPAdapter
 	breakers map[models.PSPName]*circuitbreaker.CircuitBreaker
 	rules    []models.RoutingRule
@@ -25,16 +27,22 @@ func NewPaymentRouter() *PaymentRouter {
 }
 
 func (r *PaymentRouter) RegisterAdapter(name models.PSPName, a adapter.PSPAdapter) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.adapters[name] = a
 	r.breakers[name] = circuitbreaker.New(string(name), circuitbreaker.DefaultConfig())
 }
 
 func (r *PaymentRouter) LoadRules(rules []models.RoutingRule) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.rules = rules
 }
 
 // GetAdapter returns the PSP adapter by name.
 func (r *PaymentRouter) GetAdapter(name models.PSPName) (adapter.PSPAdapter, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	adp, ok := r.adapters[name]
 	if !ok {
 		return nil, fmt.Errorf("PSP adapter %q not found", name)
@@ -44,20 +52,28 @@ func (r *PaymentRouter) GetAdapter(name models.PSPName) (adapter.PSPAdapter, err
 
 // RecordSuccess signals a successful PSP call to the circuit breaker.
 func (r *PaymentRouter) RecordSuccess(psp models.PSPName) {
-	if cb, ok := r.breakers[psp]; ok {
+	r.mu.RLock()
+	cb, ok := r.breakers[psp]
+	r.mu.RUnlock()
+	if ok {
 		cb.RecordSuccess()
 	}
 }
 
 // RecordFailure signals a failed PSP call to the circuit breaker.
 func (r *PaymentRouter) RecordFailure(psp models.PSPName) {
-	if cb, ok := r.breakers[psp]; ok {
+	r.mu.RLock()
+	cb, ok := r.breakers[psp]
+	r.mu.RUnlock()
+	if ok {
 		cb.RecordFailure()
 	}
 }
 
 // GetBreakerStats returns circuit breaker stats for all PSPs.
 func (r *PaymentRouter) GetBreakerStats() map[string]circuitbreaker.Stats {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	stats := make(map[string]circuitbreaker.Stats)
 	for name, cb := range r.breakers {
 		stats[string(name)] = cb.Stats()
@@ -68,6 +84,9 @@ func (r *PaymentRouter) GetBreakerStats() map[string]circuitbreaker.Stats {
 // Route selects the best PSP, respecting circuit breaker state.
 // If the primary PSP's breaker is open, it falls back automatically.
 func (r *PaymentRouter) Route(ctx context.Context, req models.CreatePaymentRequest) (*models.RoutingDecision, adapter.PSPAdapter, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	// Explicit merchant preference (bypass rules, but still check breaker)
 	if req.RoutingPreferences != nil && req.RoutingPreferences.PreferredPSP != "" {
 		pref := models.PSPName(req.RoutingPreferences.PreferredPSP)

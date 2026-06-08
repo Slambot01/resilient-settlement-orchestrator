@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -39,7 +40,8 @@ func (h *PaymentHandler) CreatePayment(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.svc.CreatePayment(r.Context(), req)
 	if err != nil {
-		response.ErrorWithDetails(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create payment", err.Error())
+		slog.Error("failed to create payment", slog.Any("error", err))
+		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create payment")
 		return
 	}
 
@@ -60,7 +62,8 @@ func (h *PaymentHandler) GetPayment(w http.ResponseWriter, r *http.Request) {
 			response.Error(w, http.StatusNotFound, "NOT_FOUND", "payment not found")
 			return
 		}
-		response.ErrorWithDetails(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch payment", err.Error())
+		slog.Error("failed to fetch payment", slog.Any("error", err), slog.String("payment_id", id))
+		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch payment")
 		return
 	}
 
@@ -77,7 +80,8 @@ func (h *PaymentHandler) CapturePayment(w http.ResponseWriter, r *http.Request) 
 
 	res, err := h.svc.CapturePayment(r.Context(), id)
 	if err != nil {
-		response.ErrorWithDetails(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to capture payment", err.Error())
+		slog.Error("failed to capture payment", slog.Any("error", err), slog.String("payment_id", id))
+		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to capture payment")
 		return
 	}
 
@@ -105,7 +109,8 @@ func (h *PaymentHandler) RefundPayment(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.svc.RefundPayment(r.Context(), id, req.Amount)
 	if err != nil {
-		response.ErrorWithDetails(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to refund payment", err.Error())
+		slog.Error("failed to refund payment", slog.Any("error", err), slog.String("payment_id", id))
+		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to refund payment")
 		return
 	}
 
@@ -122,7 +127,8 @@ func (h *PaymentHandler) CancelPayment(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.svc.CancelPayment(r.Context(), id)
 	if err != nil {
-		response.ErrorWithDetails(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to cancel payment", err.Error())
+		slog.Error("failed to cancel payment", slog.Any("error", err), slog.String("payment_id", id))
+		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to cancel payment")
 		return
 	}
 

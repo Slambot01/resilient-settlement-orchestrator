@@ -135,7 +135,9 @@ func main() {
 			w.Write([]byte(`{"service":"payment-orchestrator","version":"v1"}`))
 		})
 		
+		// Payment routes — protected by API key
 		r.Route("/payments", func(r chi.Router) {
+			r.Use(middleware.APIKeyAuth(cfg.Auth.APIKeys))
 			r.Use(middleware.Idempotency(redisClient))
 			r.Post("/", paymentHandler.CreatePayment)
 			r.Get("/{id}", paymentHandler.GetPayment)
@@ -144,11 +146,14 @@ func main() {
 			r.Post("/{id}/cancel", paymentHandler.CancelPayment)
 		})
 		
+		// Ledger routes — protected by API key
 		r.Route("/ledger", func(r chi.Router) {
+			r.Use(middleware.APIKeyAuth(cfg.Auth.APIKeys))
 			r.Get("/accounts/{code}/balance", ledgerHandler.GetAccountBalance)
 			r.Get("/entries", ledgerHandler.GetRecentEntries)
 		})
 
+		// Webhook routes — authenticated via PSP signature verification in service layer
 		r.Post("/webhooks/{psp}", webhookHandler.HandleWebhook)
 
 		// Admin routes — protected by API key

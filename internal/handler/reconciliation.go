@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -39,7 +40,8 @@ func (h *ReconciliationHandler) TriggerReconciliation(w http.ResponseWriter, r *
 
 	record, err := h.svc.RunBatchReconciliation(r.Context(), psp, date)
 	if err != nil {
-		response.ErrorWithDetails(w, http.StatusInternalServerError, "RECONCILIATION_FAILED", "batch reconciliation failed", err.Error())
+		slog.Error("batch reconciliation failed", slog.Any("error", err), slog.String("psp", psp))
+		response.Error(w, http.StatusInternalServerError, "RECONCILIATION_FAILED", "batch reconciliation failed")
 		return
 	}
 
@@ -56,7 +58,8 @@ func (h *ReconciliationHandler) GetDiscrepancies(w http.ResponseWriter, r *http.
 
 	discrepancies, err := h.svc.GetDiscrepancies(r.Context(), id)
 	if err != nil {
-		response.ErrorWithDetails(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch discrepancies", err.Error())
+		slog.Error("failed to fetch discrepancies", slog.Any("error", err), slog.String("reconciliation_id", id))
+		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch discrepancies")
 		return
 	}
 

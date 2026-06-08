@@ -61,8 +61,9 @@ func (d DatabaseConfig) DSN() string {
 }
 
 // Load reads configuration from environment variables with sensible defaults.
+// In production, it validates that critical secrets are set and panics if not.
 func Load() *Config {
-	return &Config{
+	cfg := &Config{
 		Server: ServerConfig{
 			Port: getEnvInt("SERVER_PORT", 8080),
 			Env:  getEnv("SERVER_ENV", "development"),
@@ -71,7 +72,7 @@ func Load() *Config {
 			Host:     getEnv("DB_HOST", "localhost"),
 			Port:     getEnvInt("DB_PORT", 5432),
 			User:     getEnv("DB_USER", "payment_user"),
-			Password: getEnv("DB_PASSWORD", "payment_secret"),
+			Password: getEnv("DB_PASSWORD", ""),
 			DBName:   getEnv("DB_NAME", "payment_orchestrator"),
 			SSLMode:  getEnv("DB_SSL_MODE", "disable"),
 			MaxConns: getEnvInt("DB_MAX_CONNS", 25),
@@ -91,6 +92,22 @@ func Load() *Config {
 			APIKeys: getEnvSlice("API_KEYS"),
 		},
 	}
+
+	// Fail fast in production if critical secrets are missing
+	if cfg.Server.Env == "production" {
+		var missing []string
+		if cfg.Database.Password == "" {
+			missing = append(missing, "DB_PASSWORD")
+		}
+		if len(cfg.Auth.APIKeys) == 0 {
+			missing = append(missing, "API_KEYS")
+		}
+		if len(missing) > 0 {
+			panic(fmt.Sprintf("FATAL: required environment variables not set for production: %v", missing))
+		}
+	}
+
+	return cfg
 }
 
 func getEnv(key, fallback string) string {

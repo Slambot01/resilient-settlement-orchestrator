@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -32,7 +33,8 @@ func (h *LedgerHandler) GetAccountBalance(w http.ResponseWriter, r *http.Request
 			response.Error(w, http.StatusNotFound, "NOT_FOUND", "account not found")
 			return
 		}
-		response.ErrorWithDetails(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch balance", err.Error())
+		slog.Error("failed to fetch balance", slog.Any("error", err), slog.String("account_code", code))
+		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch balance")
 		return
 	}
 
@@ -48,7 +50,8 @@ func (h *LedgerHandler) GetRecentEntries(w http.ResponseWriter, r *http.Request)
 
 	entries, err := h.svc.GetRecentEntries(r.Context(), limit)
 	if err != nil {
-		response.ErrorWithDetails(w, http.StatusInternalServerError, "LEDGER_ERROR", "failed to fetch entries", err.Error())
+		slog.Error("failed to fetch ledger entries", slog.Any("error", err))
+		response.Error(w, http.StatusInternalServerError, "LEDGER_ERROR", "failed to fetch entries")
 		return
 	}
 

@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -19,6 +20,9 @@ func NewWebhookHandler(svc *service.WebhookService) *WebhookHandler {
 	return &WebhookHandler{svc: svc}
 }
 
+// maxWebhookBodySize caps incoming webhook payloads to prevent OOM from oversized requests.
+const maxWebhookBodySize = 1 << 20 // 1 MB
+
 // HandleWebhook receives POST /v1/webhooks/{psp}
 // PSPs expect 200 OK on success and will retry on non-200.
 func (h *WebhookHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
@@ -28,7 +32,7 @@ func (h *WebhookHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxWebhookBodySize))
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_REQUEST", "failed to read request body")
 		return
@@ -48,7 +52,8 @@ func (h *WebhookHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.svc.IngestWebhook(r.Context(), psp, eventType, body, signature); err != nil {
-		response.ErrorWithDetails(w, http.StatusInternalServerError, "WEBHOOK_PROCESSING_FAILED", "failed to process webhook", err.Error())
+		slog.Error("failed to process webhook", slog.Any("error", err), slog.String("psp", psp), slog.String("event_type", eventType))
+		response.Error(w, http.StatusInternalServerError, "WEBHOOK_PROCESSING_FAILED", "failed to process webhook")
 		return
 	}
 

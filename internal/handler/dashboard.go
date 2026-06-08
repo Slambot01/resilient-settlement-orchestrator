@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -24,7 +25,8 @@ func (h *DashboardHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 
 	stats, err := h.svc.GetStats(r.Context(), from, to)
 	if err != nil {
-		response.ErrorWithDetails(w, http.StatusInternalServerError, "STATS_ERROR", "failed to fetch dashboard stats", err.Error())
+		slog.Error("failed to fetch dashboard stats", slog.Any("error", err))
+		response.Error(w, http.StatusInternalServerError, "STATS_ERROR", "failed to fetch dashboard stats")
 		return
 	}
 
@@ -37,7 +39,8 @@ func (h *DashboardHandler) GetDailyVolume(w http.ResponseWriter, r *http.Request
 
 	volume, err := h.svc.GetDailyVolume(r.Context(), from, to)
 	if err != nil {
-		response.ErrorWithDetails(w, http.StatusInternalServerError, "VOLUME_ERROR", "failed to fetch daily volume", err.Error())
+		slog.Error("failed to fetch daily volume", slog.Any("error", err))
+		response.Error(w, http.StatusInternalServerError, "VOLUME_ERROR", "failed to fetch daily volume")
 		return
 	}
 
@@ -71,7 +74,8 @@ func parseDateRange(r *http.Request) (time.Time, time.Time) {
 func (h *DashboardHandler) GetPSPHealth(w http.ResponseWriter, r *http.Request) {
 	health, err := h.svc.GetPSPHealth(r.Context())
 	if err != nil {
-		response.ErrorWithDetails(w, http.StatusInternalServerError, "PSP_HEALTH_ERROR", "failed to fetch PSP health", err.Error())
+		slog.Error("failed to fetch PSP health", slog.Any("error", err))
+		response.Error(w, http.StatusInternalServerError, "PSP_HEALTH_ERROR", "failed to fetch PSP health")
 		return
 	}
 
@@ -91,7 +95,8 @@ func (h *DashboardHandler) GetRecentPayments(w http.ResponseWriter, r *http.Requ
 
 	payments, total, err := h.svc.GetRecentPayments(r.Context(), offset, limit)
 	if err != nil {
-		response.ErrorWithDetails(w, http.StatusInternalServerError, "PAYMENTS_ERROR", "failed to fetch recent payments", err.Error())
+		slog.Error("failed to fetch recent payments", slog.Any("error", err))
+		response.Error(w, http.StatusInternalServerError, "PAYMENTS_ERROR", "failed to fetch recent payments")
 		return
 	}
 
@@ -112,7 +117,8 @@ func (h *DashboardHandler) GetActivityFeed(w http.ResponseWriter, r *http.Reques
 
 	events, err := h.svc.GetActivityFeed(r.Context(), limit)
 	if err != nil {
-		response.ErrorWithDetails(w, http.StatusInternalServerError, "ACTIVITY_ERROR", "failed to fetch activity feed", err.Error())
+		slog.Error("failed to fetch activity feed", slog.Any("error", err))
+		response.Error(w, http.StatusInternalServerError, "ACTIVITY_ERROR", "failed to fetch activity feed")
 		return
 	}
 

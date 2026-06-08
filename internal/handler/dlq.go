@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -28,7 +29,8 @@ func (h *DLQHandler) ListEntries(w http.ResponseWriter, r *http.Request) {
 
 	entries, total, err := h.svc.List(r.Context(), offset, limit)
 	if err != nil {
-		response.ErrorWithDetails(w, http.StatusInternalServerError, "DLQ_ERROR", "failed to list dead letter queue", err.Error())
+		slog.Error("failed to list dead letter queue", slog.Any("error", err))
+		response.Error(w, http.StatusInternalServerError, "DLQ_ERROR", "failed to list dead letter queue")
 		return
 	}
 
@@ -53,7 +55,8 @@ func (h *DLQHandler) RetryEntry(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.svc.Retry(r.Context(), req.Index); err != nil {
-		response.ErrorWithDetails(w, http.StatusInternalServerError, "DLQ_RETRY_FAILED", "retry failed", err.Error())
+		slog.Error("dlq retry failed", slog.Any("error", err), slog.Int64("index", req.Index))
+		response.Error(w, http.StatusInternalServerError, "DLQ_RETRY_FAILED", "retry failed")
 		return
 	}
 
@@ -63,7 +66,8 @@ func (h *DLQHandler) RetryEntry(w http.ResponseWriter, r *http.Request) {
 // PurgeQueue handles DELETE /v1/dlq
 func (h *DLQHandler) PurgeQueue(w http.ResponseWriter, r *http.Request) {
 	if err := h.svc.Purge(r.Context()); err != nil {
-		response.ErrorWithDetails(w, http.StatusInternalServerError, "DLQ_PURGE_FAILED", "purge failed", err.Error())
+		slog.Error("dlq purge failed", slog.Any("error", err))
+		response.Error(w, http.StatusInternalServerError, "DLQ_PURGE_FAILED", "purge failed")
 		return
 	}
 
