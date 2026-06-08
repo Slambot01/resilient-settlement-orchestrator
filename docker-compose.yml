@@ -1,3 +1,7 @@
+# ============================================================================
+# DEVELOPMENT ONLY — DO NOT use this file for staging or production.
+# For production, use Kubernetes manifests with secrets from GCP Secret Manager.
+# ============================================================================
 version: "3.9"
 
 services:
@@ -7,21 +11,13 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
+    env_file:
+      - .env
     environment:
+      # Override only what's needed for Docker networking
       - SERVER_ENV=development
-      - SERVER_PORT=8080
       - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_USER=payment_user
-      - DB_PASSWORD=payment_secret
-      - DB_NAME=payment_orchestrator
-      - DB_SSL_MODE=disable
       - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - API_KEYS=${API_KEYS:-dev-api-key-change-me}
-      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
-      - RAZORPAY_KEY_ID=${RAZORPAY_KEY_ID:-}
-      - RAZORPAY_KEY_SECRET=${RAZORPAY_KEY_SECRET:-}
       - PUBSUB_EMULATOR_HOST=pubsub-emulator:8085
       - PUBSUB_PROJECT_ID=local-dev
       - PUBSUB_ENABLED=true
@@ -37,16 +33,18 @@ services:
     image: postgres:16-alpine
     container_name: payment_postgres
     restart: unless-stopped
+    # V-023: Bind to localhost only — prevents external access to DB
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     environment:
-      POSTGRES_USER: payment_user
-      POSTGRES_PASSWORD: payment_secret
-      POSTGRES_DB: payment_orchestrator
+      # V-021: Credentials loaded from .env file, not hardcoded
+      POSTGRES_USER: ${DB_USER:-payment_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-payment_secret}
+      POSTGRES_DB: ${DB_NAME:-payment_orchestrator}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U payment_user -d payment_orchestrator"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-payment_user} -d ${DB_NAME:-payment_orchestrator}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -55,8 +53,9 @@ services:
     image: redis:7-alpine
     container_name: payment_redis
     restart: unless-stopped
+    # V-023: Bind to localhost only — prevents external access to Redis
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -64,12 +63,13 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
   pubsub-emulator:
     image: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
     container_name: payment_pubsub
     command: gcloud beta emulators pubsub start --host-port=0.0.0.0:8085
     ports:
-      - "8085:8085"
+      - "127.0.0.1:8085:8085"
 
 volumes:
   pgdata:

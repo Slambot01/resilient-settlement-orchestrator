@@ -160,12 +160,21 @@ func main() {
 	// Legacy format (no colon): treated as admin key
 	merchantKeys := middleware.ParseMerchantKeys(cfg.Auth.APIKeys)
 
+	// V-022: Refuse to start without API keys in production
+	if len(merchantKeys) == 0 && cfg.Server.Env == "production" {
+		logger.Error("API_KEYS not configured — refusing to start in production without authentication")
+		os.Exit(1)
+	}
+	if len(merchantKeys) == 0 {
+		logger.Warn("API_KEYS not configured — all authenticated endpoints will reject requests")
+	}
+
 	// ── Create router ───────────────────────────────────────────────
 	r := chi.NewRouter()
 
 	// Global middleware
 	r.Use(chimw.RequestID)
-	r.Use(chimw.RealIP)
+	r.Use(middleware.RealIPFromTrustedProxy) // V-027: only trust X-Forwarded-For from known proxies
 	r.Use(middleware.CORS(middleware.DefaultCORSConfig()))
 	r.Use(middleware.SecurityHeaders) // HSTS, CSP, X-Frame-Options, etc.
 	r.Use(middleware.MaxBodySize(1 << 20)) // 1 MB global body limit

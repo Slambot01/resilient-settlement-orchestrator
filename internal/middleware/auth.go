@@ -3,8 +3,11 @@ package middleware
 import (
 	"context"
 	"crypto/subtle"
+	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 )
 
 type authContextKey string
@@ -56,6 +59,9 @@ func ParseMerchantKeys(rawKeys []string) []MerchantKey {
 //	    r.Post("/payments", handler.CreatePayment)
 //	})
 func APIKeyAuth(keys []MerchantKey) func(http.Handler) http.Handler {
+	// V-026: per-instance auth failure tracker for brute-force protection
+	tracker := newAuthFailureTracker(10, 15*time.Minute)
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if len(keys) == 0 {
@@ -63,6 +69,18 @@ func APIKeyAuth(keys []MerchantKey) func(http.Handler) http.Handler {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusUnauthorized)
 				w.Write([]byte(`{"success":false,"error":{"code":"UNAUTHORIZED","message":"API authentication not configured"}}`))
+				return
+			}
+
+			// V-026: Check if this IP is locked out due to too many failed attempts
+			clientIP := r.RemoteAddr
+			if tracker.isBlocked(clientIP) {
+				slog.Warn("auth brute-force lockout",
+					slog.String("remote_addr", clientIP))
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Retry-After", "60")
+				w.WriteHeader(http.StatusTooManyRequests)
+				w.Write([]byte(`{"success":false,"error":{"code":"RATE_LIMITED","message":"too many failed auth attempts, please retry later"}}`))
 				return
 			}
 
@@ -76,11 +94,15 @@ func APIKeyAuth(keys []MerchantKey) func(http.Handler) http.Handler {
 
 			merchantID := validateKeyAndGetMerchant(token, keys)
 			if merchantID == "" {
+				tracker.recordFailure(clientIP)
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusForbidden)
 				w.Write([]byte(`{"success":false,"error":{"code":"FORBIDDEN","message":"invalid API key"}}`))
 				return
 			}
+
+			// Reset failure count on successful auth
+			tracker.resetFailures(clientIP)
 
 			// Inject merchant_id into context for downstream ownership checks
 			ctx := context.WithValue(r.Context(), merchantIDKey, merchantID)
@@ -129,3 +151,75 @@ func validateKeyAndGetMerchant(token string, keys []MerchantKey) string {
 	return matched
 }
 
+// ── V-026: Auth Failure Tracker ─────────────────────────────────────────
+
+type authFailureEntry struct {
+	count    int
+	firstAt  time.Time
+}
+
+type authFailureTracker struct {
+	mu        sync.Mutex
+	failures  map[string]*authFailureEntry
+	maxFails  int
+	window    time.Duration
+}
+
+func newAuthFailureTracker(maxFails int, window time.Duration) *authFailureTracker {
+	t := &authFailureTracker{
+		failures: make(map[string]*authFailureEntry),
+		maxFails: maxFails,
+		window:   window,
+	}
+	// Background cleanup every 5 minutes
+	go func() {
+		for {
+			time.Sleep(5 * time.Minute)
+			t.cleanup()
+		}
+	}()
+	return t
+}
+
+func (t *authFailureTracker) recordFailure(ip string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	entry, exists := t.failures[ip]
+	if !exists || time.Since(entry.firstAt) > t.window {
+		t.failures[ip] = &authFailureEntry{count: 1, firstAt: time.Now()}
+		return
+	}
+	entry.count++
+}
+
+func (t *authFailureTracker) isBlocked(ip string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	entry, exists := t.failures[ip]
+	if !exists {
+		return false
+	}
+	// Expired window — not blocked
+	if time.Since(entry.firstAt) > t.window {
+		delete(t.failures, ip)
+		return false
+	}
+	return entry.count >= t.maxFails
+}
+
+func (t *authFailureTracker) resetFailures(ip string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.failures, ip)
+}
+
+func (t *authFailureTracker) cleanup() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	now := time.Now()
+	for ip, entry := range t.failures {
+		if now.Sub(entry.firstAt) > t.window {
+			delete(t.failures, ip)
+		}
+	}
+}

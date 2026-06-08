@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -22,10 +23,11 @@ func Logger(logger *slog.Logger) func(http.Handler) http.Handler {
 			reqID := chimw.GetReqID(r.Context())
 
 			// Attach request-scoped logger to context
+			// V-024: sanitize user-controlled path to prevent log injection
 			reqLogger := logger.With(
 				slog.String("request_id", reqID),
 				slog.String("method", r.Method),
-				slog.String("path", r.URL.Path),
+				slog.String("path", sanitizeLogValue(r.URL.Path)),
 			)
 			ctx := context.WithValue(r.Context(), loggerCtxKey, reqLogger)
 
@@ -37,20 +39,21 @@ func Logger(logger *slog.Logger) func(http.Handler) http.Handler {
 			duration := time.Since(start)
 
 			// Choose log level based on status code
+			// V-024: sanitize all user-controlled values before logging
 			attrs := []slog.Attr{
 				slog.String("request_id", reqID),
 				slog.String("method", r.Method),
-				slog.String("path", r.URL.Path),
+				slog.String("path", sanitizeLogValue(r.URL.Path)),
 				slog.Int("status", wrapped.statusCode),
 				slog.Duration("duration", duration),
 				slog.Int64("response_bytes", wrapped.bytesWritten),
-				slog.String("remote_addr", r.RemoteAddr),
-				slog.String("user_agent", r.UserAgent()),
+				slog.String("remote_addr", sanitizeLogValue(r.RemoteAddr)),
+				slog.String("user_agent", sanitizeLogValue(r.UserAgent())),
 			}
 
 			// Add query params if present
 			if r.URL.RawQuery != "" {
-				attrs = append(attrs, slog.String("query", r.URL.RawQuery))
+				attrs = append(attrs, slog.String("query", sanitizeLogValue(r.URL.RawQuery)))
 			}
 
 			msg := "http request"
@@ -79,7 +82,7 @@ func Recoverer(logger *slog.Logger) func(http.Handler) http.Handler {
 						slog.Any("error", err),
 						slog.String("request_id", reqID),
 						slog.String("method", r.Method),
-						slog.String("path", r.URL.Path),
+						slog.String("path", sanitizeLogValue(r.URL.Path)),
 					)
 					http.Error(w, `{"success":false,"error":{"code":"INTERNAL_ERROR","message":"internal server error"}}`, http.StatusInternalServerError)
 				}
@@ -124,4 +127,20 @@ func (w *statusResponseWriter) Write(b []byte) (int, error) {
 	n, err := w.ResponseWriter.Write(b)
 	w.bytesWritten += int64(n)
 	return n, err
+}
+
+// sanitizeLogValue strips control characters (newlines, tabs, ANSI escape codes)
+// from user-controlled strings before they are written to logs.
+// This prevents log injection attacks where crafted paths/headers could:
+//   - Forge fake log entries via injected newlines
+//   - Corrupt terminal output via ANSI escape sequences
+//   - Hide malicious activity by overwriting previous log lines
+func sanitizeLogValue(s string) string {
+	return strings.Map(func(r rune) rune {
+		// Strip all C0 control characters (0x00-0x1F) and DEL (0x7F)
+		if r < 0x20 || r == 0x7F {
+			return -1 // drop the character
+		}
+		return r
+	}, s)
 }

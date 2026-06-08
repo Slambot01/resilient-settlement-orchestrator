@@ -64,7 +64,22 @@ func (h *DLQHandler) RetryEntry(w http.ResponseWriter, r *http.Request) {
 }
 
 // PurgeQueue handles DELETE /v1/dlq
+// V-025: Requires X-Confirm-Purge header to prevent accidental data loss.
 func (h *DLQHandler) PurgeQueue(w http.ResponseWriter, r *http.Request) {
+	// Safety gate: require explicit confirmation to prevent accidental purge
+	confirm := r.Header.Get("X-Confirm-Purge")
+	if confirm != "yes" {
+		response.Error(w, http.StatusBadRequest, "CONFIRMATION_REQUIRED",
+			"DLQ purge is destructive. Set header 'X-Confirm-Purge: yes' to confirm.")
+		return
+	}
+
+	// Log the purge action for audit trail
+	slog.Warn("DLQ purge initiated",
+		slog.String("remote_addr", r.RemoteAddr),
+		slog.String("user_agent", r.UserAgent()),
+	)
+
 	if err := h.svc.Purge(r.Context()); err != nil {
 		slog.Error("dlq purge failed", slog.Any("error", err))
 		response.Error(w, http.StatusInternalServerError, "DLQ_PURGE_FAILED", "purge failed")
