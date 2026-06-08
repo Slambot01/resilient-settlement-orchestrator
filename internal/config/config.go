@@ -12,6 +12,7 @@ type Config struct {
 	Server   ServerConfig
 	Database DatabaseConfig
 	Redis    RedisConfig
+	PubSub   PubSubConfig
 	Log      LogConfig
 	Auth     AuthConfig
 }
@@ -53,6 +54,18 @@ type AuthConfig struct {
 	APIKeys []string
 }
 
+// PubSubConfig holds Google Cloud Pub/Sub settings.
+type PubSubConfig struct {
+	ProjectID      string
+	WebhookTopicID string
+	EventTopicID   string
+	SubscriptionID string
+	DLQTopicID     string
+	DLQSubID       string
+	MaxRetries     int
+	Enabled        bool
+}
+
 // DSN returns the PostgreSQL connection string.
 func (d DatabaseConfig) DSN() string {
 	return fmt.Sprintf(
@@ -91,6 +104,16 @@ func Load() *Config {
 		},
 		Auth: AuthConfig{
 			APIKeys: getEnvSlice("API_KEYS"),
+		},
+		PubSub: PubSubConfig{
+			ProjectID:      getEnv("PUBSUB_PROJECT_ID", "local-dev"),
+			WebhookTopicID: getEnv("PUBSUB_WEBHOOK_TOPIC", "webhook-events"),
+			EventTopicID:   getEnv("PUBSUB_EVENT_TOPIC", "payment-state-changes"),
+			SubscriptionID: getEnv("PUBSUB_SUBSCRIPTION", "webhook-processor"),
+			DLQTopicID:     getEnv("PUBSUB_DLQ_TOPIC", "webhook-events-dlq"),
+			DLQSubID:       getEnv("PUBSUB_DLQ_SUBSCRIPTION", "webhook-dlq-reader"),
+			MaxRetries:     getEnvInt("PUBSUB_MAX_RETRIES", 5),
+			Enabled:        getEnv("PUBSUB_ENABLED", "false") == "true",
 		},
 	}
 

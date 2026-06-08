@@ -144,8 +144,10 @@ func TestBackoffDuration_CapsAtMaxWait(t *testing.T) {
 
 	d := backoffDuration(5, cfg) // would be huge without cap
 
-	if d > cfg.MaxWait {
-		t.Errorf("expected backoff capped at %v, got %v", cfg.MaxWait, d)
+	// With ±25% jitter, the capped value can be up to MaxWait * 1.25
+	maxWithJitter := time.Duration(float64(cfg.MaxWait) * 1.26)
+	if d > maxWithJitter {
+		t.Errorf("expected backoff capped near %v (with jitter), got %v", cfg.MaxWait, d)
 	}
 }
 

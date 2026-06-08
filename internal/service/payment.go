@@ -12,19 +12,22 @@ import (
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/adapter"
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/models"
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/pkg/retry"
+	appPubSub "github.com/Slambot01/resilient-settlement-orchestrator/internal/pubsub"
 )
 
 type PaymentService struct {
 	db     *pgxpool.Pool
 	router *PaymentRouter
 	ledger *LedgerService
+	pubsub *appPubSub.Client // nil when Pub/Sub is disabled
 }
 
-func NewPaymentService(db *pgxpool.Pool, router *PaymentRouter, ledger *LedgerService) *PaymentService {
+func NewPaymentService(db *pgxpool.Pool, router *PaymentRouter, ledger *LedgerService, pubsubClient *appPubSub.Client) *PaymentService {
 	return &PaymentService{
 		db:     db,
 		router: router,
 		ledger: ledger,
+		pubsub: pubsubClient,
 	}
 }
 
@@ -205,7 +208,16 @@ func (s *PaymentService) updatePaymentState(ctx context.Context, paymentID strin
 		return err
 	}
 
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+
+	// Publish payment state change event (fire-and-forget, doesn't block payment flow)
+	if s.pubsub != nil {
+		s.pubsub.PublishPaymentEvent(ctx, paymentID, string(from), string(to), trigger)
+	}
+
+	return nil
 }
 
 // CapturePayment captures an authorized payment.

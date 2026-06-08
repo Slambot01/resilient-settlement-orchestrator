@@ -20,6 +20,7 @@ import (
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/middleware"
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/models"
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/pkg/metrics"
+	appPubSub "github.com/Slambot01/resilient-settlement-orchestrator/internal/pubsub"
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/service"
 )
 
@@ -91,7 +92,34 @@ func main() {
 		},
 	})
 
-	paymentService := service.NewPaymentService(dbPool, paymentRouter, ledgerService)
+	// ── Connect to Google Cloud Pub/Sub ─────────────────────────────
+	var pubsubClient *appPubSub.Client
+	if cfg.PubSub.Enabled {
+		pubsubClient, err = appPubSub.NewClient(ctx, appPubSub.Config{
+			ProjectID:      cfg.PubSub.ProjectID,
+			WebhookTopicID: cfg.PubSub.WebhookTopicID,
+			EventTopicID:   cfg.PubSub.EventTopicID,
+			SubscriptionID: cfg.PubSub.SubscriptionID,
+			DLQTopicID:     cfg.PubSub.DLQTopicID,
+			DLQSubID:       cfg.PubSub.DLQSubID,
+			MaxRetries:     cfg.PubSub.MaxRetries,
+			Enabled:        cfg.PubSub.Enabled,
+		})
+		if err != nil {
+			logger.Error("failed to connect to Pub/Sub", slog.Any("error", err))
+			os.Exit(1)
+		}
+		defer pubsubClient.Close()
+		logger.Info("google cloud pub/sub connected",
+			slog.String("project", cfg.PubSub.ProjectID),
+			slog.String("webhook_topic", cfg.PubSub.WebhookTopicID),
+			slog.String("event_topic", cfg.PubSub.EventTopicID),
+		)
+	} else {
+		logger.Info("pub/sub disabled, using synchronous webhook processing")
+	}
+
+	paymentService := service.NewPaymentService(dbPool, paymentRouter, ledgerService, pubsubClient)
 
 	// PSP adapter registry for webhook signature verification
 	pspAdapters := map[string]adapter.PSPAdapter{
@@ -102,12 +130,22 @@ func main() {
 	dlqService := service.NewDLQService(redisClient, webhookService)
 	dashboardService := service.NewDashboardService(dbPool, paymentRouter)
 
+	// ── Start Pub/Sub Webhook Subscriber ────────────────────────────
+	if pubsubClient != nil {
+		go func() {
+			logger.Info("starting pub/sub webhook subscriber worker")
+			if err := pubsubClient.StartWebhookSubscriber(ctx, webhookService); err != nil {
+				logger.Error("webhook subscriber stopped", slog.Any("error", err))
+			}
+		}()
+	}
+
 	// ── Initialize Handlers ─────────────────────────────────────────
 	
 	healthHandler := handler.NewHealthHandler(cfg, dbPool, redisClient)
 	paymentHandler := handler.NewPaymentHandler(paymentService)
 	ledgerHandler := handler.NewLedgerHandler(ledgerService)
-	webhookHandler := handler.NewWebhookHandler(webhookService)
+	webhookHandler := handler.NewWebhookHandler(webhookService, pubsubClient)
 	reconHandler := handler.NewReconciliationHandler(reconService)
 	dlqHandler := handler.NewDLQHandler(dlqService)
 	dashboardHandler := handler.NewDashboardHandler(dashboardService)
