@@ -126,3 +126,17 @@ variable "gke_node_machine_type" {
   type        = string
   default     = "e2-medium" # 2 vCPU, 4 GB RAM - cost-effective
 }
+
+# ── Monitoring (Phase 8) ───────────────────────────────────────────────────
+
+variable "alert_email" {
+  description = "Email address for monitoring alerts"
+  type        = string
+  default     = "admin@example.com"
+}
+
+variable "app_domain" {
+  description = "Application domain for uptime checks (set after Ingress is deployed)"
+  type        = string
+  default     = "example.com"
+}
