@@ -69,3 +69,35 @@ output "name_prefix" {
   description = "Resource naming prefix used across all phases"
   value       = local.name_prefix
 }
+
+# ── Cloud SQL (Phase 2) ────────────────────────────────────────────────────
+
+output "db_instance_name" {
+  description = "Cloud SQL instance name"
+  value       = google_sql_database_instance.postgres.name
+}
+
+output "db_connection_name" {
+  description = "Cloud SQL connection name (used by Cloud SQL Auth Proxy in GKE)"
+  value       = google_sql_database_instance.postgres.connection_name
+}
+
+output "db_private_ip" {
+  description = "Cloud SQL private IP address"
+  value       = google_sql_database_instance.postgres.private_ip_address
+}
+
+output "db_name" {
+  description = "PostgreSQL database name"
+  value       = google_sql_database.payment_db.name
+}
+
+output "db_user" {
+  description = "PostgreSQL application username"
+  value       = google_sql_user.app_user.name
+}
+
+output "db_password_secret_id" {
+  description = "Secret Manager secret ID for the database password"
+  value       = google_secret_manager_secret.db_password.secret_id
+}

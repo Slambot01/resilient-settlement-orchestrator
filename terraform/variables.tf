@@ -72,3 +72,49 @@ variable "private_service_cidr" {
   type        = string
   default     = "10.2.0.0/16" # Reserved for Google-managed services
 }
+
+# ── Cloud SQL (Phase 2) ────────────────────────────────────────────────────
+
+variable "db_tier" {
+  description = "Cloud SQL machine tier (vCPUs + RAM)"
+  type        = string
+  default     = "db-custom-2-7680" # 2 vCPU, 7.5 GB RAM
+}
+
+variable "db_disk_size_gb" {
+  description = "Initial disk size in GB (auto-resizes)"
+  type        = number
+  default     = 20
+}
+
+variable "db_high_availability" {
+  description = "Enable regional HA with automatic failover (doubles cost)"
+  type        = bool
+  default     = true
+}
+
+variable "db_name" {
+  description = "PostgreSQL database name"
+  type        = string
+  default     = "payment_orchestrator"
+}
+
+variable "db_user" {
+  description = "PostgreSQL application username"
+  type        = string
+  default     = "payment_user"
+}
+
+# ── Memorystore Redis (Phase 3) ────────────────────────────────────────────
+
+variable "redis_memory_size_gb" {
+  description = "Redis instance memory in GB"
+  type        = number
+  default     = 1
+}
+
+variable "redis_version" {
+  description = "Redis version for Memorystore"
+  type        = string
+  default     = "REDIS_7_0"
+}
