@@ -150,3 +150,35 @@ output "pubsub_service_account_email" {
   description = "Service account email for Pub/Sub (used in Workload Identity binding)"
   value       = google_service_account.pubsub_sa.email
 }
+
+# ── Secret Manager & Service Account (Phase 5) ─────────────────────────────
+
+output "app_service_account_email" {
+  description = "Main application service account email (bind to GKE via Workload Identity)"
+  value       = google_service_account.app_sa.email
+}
+
+output "secret_api_keys_id" {
+  description = "Secret Manager ID for API keys"
+  value       = google_secret_manager_secret.api_keys.secret_id
+}
+
+output "secret_stripe_key_id" {
+  description = "Secret Manager ID for Stripe secret key"
+  value       = google_secret_manager_secret.stripe_secret_key.secret_id
+}
+
+output "secret_stripe_webhook_id" {
+  description = "Secret Manager ID for Stripe webhook secret"
+  value       = google_secret_manager_secret.stripe_webhook_secret.secret_id
+}
+
+output "secret_razorpay_key_id" {
+  description = "Secret Manager ID for Razorpay key ID"
+  value       = google_secret_manager_secret.razorpay_key_id.secret_id
+}
+
+output "secret_razorpay_secret_id" {
+  description = "Secret Manager ID for Razorpay key secret"
+  value       = google_secret_manager_secret.razorpay_key_secret.secret_id
+}
