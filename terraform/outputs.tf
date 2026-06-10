@@ -118,3 +118,35 @@ output "redis_host_secret_id" {
   description = "Secret Manager secret ID for the Redis host"
   value       = google_secret_manager_secret.redis_host.secret_id
 }
+
+# ── Pub/Sub (Phase 4) ──────────────────────────────────────────────────────
+
+output "pubsub_webhook_topic" {
+  description = "Pub/Sub webhook events topic name"
+  value       = google_pubsub_topic.webhook_events.name
+}
+
+output "pubsub_event_topic" {
+  description = "Pub/Sub payment state changes topic name"
+  value       = google_pubsub_topic.payment_events.name
+}
+
+output "pubsub_dlq_topic" {
+  description = "Pub/Sub dead-letter topic name"
+  value       = google_pubsub_topic.webhook_dlq.name
+}
+
+output "pubsub_webhook_subscription" {
+  description = "Pub/Sub webhook processing subscription name"
+  value       = google_pubsub_subscription.webhook_processor.name
+}
+
+output "pubsub_dlq_subscription" {
+  description = "Pub/Sub DLQ reader subscription name"
+  value       = google_pubsub_subscription.webhook_dlq_reader.name
+}
+
+output "pubsub_service_account_email" {
+  description = "Service account email for Pub/Sub (used in Workload Identity binding)"
+  value       = google_service_account.pubsub_sa.email
+}
