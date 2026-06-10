@@ -56,14 +56,16 @@ graph TD
 
 ```mermaid
 graph TD
-    subgraph "Google Cloud Platform"
-        LB["Cloud Load Balancing"] -->|"Ingress"| GKE["GKE Cluster"]
+    subgraph GCP ["Google Cloud Platform"]
+        LB["Cloud Load Balancing"]
         
-        subgraph "GKE Cluster (VPC)"
+        subgraph VPC ["GKE Cluster (VPC)"]
             HPA["Horizontal Pod Autoscaler"] --> Pods["App Pods"]
             Pods -->|"Workload Identity"| SA["Service Account"]
             Pods --> SecretOperator["External Secrets Operator"]
         end
+        
+        LB -->|"Ingress"| Pods
         
         SA -->|"IAM"| SecretManager["Secret Manager"]
         SecretManager -.->|"Injects Secrets"| SecretOperator
