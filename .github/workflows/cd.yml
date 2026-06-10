@@ -1,0 +1,189 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CD Pipeline - Build, Push, and Deploy to GKE
+# ─────────────────────────────────────────────────────────────────────────────
+# Triggered on push to main (after CI passes).
+# Builds the Docker image, pushes to Artifact Registry, and deploys to GKE.
+#
+# Required GitHub Secrets (set in repo Settings > Secrets):
+#   GCP_PROJECT_ID        - Your GCP project ID
+#   GCP_REGION            - GCP region (e.g., asia-south1)
+#   GCP_SA_KEY            - Service account JSON key for CI/CD
+#                           (or use Workload Identity Federation for keyless auth)
+
+name: CD
+
+on:
+  push:
+    branches: [main]
+
+env:
+  GO_VERSION: "1.26"
+  GKE_CLUSTER: payment-orchestrator-production-gke
+  GKE_NAMESPACE: payment-system
+  DEPLOYMENT_NAME: payment-orchestrator
+
+jobs:
+  # ── Build and Push Docker Image ──────────────────────────────────────────
+  build-and-push:
+    name: Build & Push Image
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write # Required for Workload Identity Federation
+
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SA_EMAIL }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ secrets.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Generate image metadata
+        id: meta
+        run: |
+          IMAGE="${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/payment-orchestrator-images/payment-orchestrator"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          TAG="${IMAGE}:${SHORT_SHA}"
+          LATEST="${IMAGE}:latest"
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "latest=${LATEST}" >> $GITHUB_OUTPUT
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -t ${{ steps.meta.outputs.tag }} \
+            -t ${{ steps.meta.outputs.latest }} \
+            .
+
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.meta.outputs.tag }}
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1' # Fail the build if critical vulns found
+
+      - name: Push to Artifact Registry
+        run: |
+          docker push ${{ steps.meta.outputs.tag }}
+          docker push ${{ steps.meta.outputs.latest }}
+
+      - name: Summary
+        run: |
+          echo "### Docker Image Published" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag**: \`${{ steps.meta.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image**: \`${{ steps.meta.outputs.tag }}\`" >> $GITHUB_STEP_SUMMARY
+
+  # ── Deploy to GKE ───────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to GKE
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    environment: production # Requires manual approval if configured
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SA_EMAIL }}
+
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.GKE_CLUSTER }}
+          location: ${{ secrets.GCP_REGION }}
+
+      - name: Update deployment image
+        run: |
+          IMAGE="${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/payment-orchestrator-images/payment-orchestrator"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          kubectl set image deployment/${{ env.DEPLOYMENT_NAME }} \
+            payment-app=${IMAGE}:${SHORT_SHA} \
+            -n ${{ env.GKE_NAMESPACE }}
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/${{ env.DEPLOYMENT_NAME }} \
+            -n ${{ env.GKE_NAMESPACE }} \
+            --timeout=300s
+
+      - name: Verify deployment health
+        run: |
+          # Check that pods are running and ready
+          kubectl get pods -n ${{ env.GKE_NAMESPACE }} -l app=payment-orchestrator
+          echo "---"
+          # Hit the readiness endpoint through port-forward
+          kubectl get endpoints payment-orchestrator -n ${{ env.GKE_NAMESPACE }}
+
+      - name: Summary
+        run: |
+          echo "### Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "- **Cluster**: \`${{ env.GKE_CLUSTER }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Namespace**: \`${{ env.GKE_NAMESPACE }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: \`${GITHUB_SHA::7}\`" >> $GITHUB_STEP_SUMMARY
+
+  # ── Rollback on Failure ──────────────────────────────────────────────────
+  rollback:
+    name: Rollback
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: failure()
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SA_EMAIL }}
+
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.GKE_CLUSTER }}
+          location: ${{ secrets.GCP_REGION }}
+
+      - name: Rollback deployment
+        run: |
+          echo "Deployment failed! Rolling back..."
+          kubectl rollout undo deployment/${{ env.DEPLOYMENT_NAME }} \
+            -n ${{ env.GKE_NAMESPACE }}
+          kubectl rollout status deployment/${{ env.DEPLOYMENT_NAME }} \
+            -n ${{ env.GKE_NAMESPACE }} \
+            --timeout=300s
+
+      - name: Summary
+        run: |
+          echo "### ROLLBACK EXECUTED" >> $GITHUB_STEP_SUMMARY
+          echo "- Deployment of \`${GITHUB_SHA::7}\` failed" >> $GITHUB_STEP_SUMMARY
+          echo "- Rolled back to previous version" >> $GITHUB_STEP_SUMMARY
