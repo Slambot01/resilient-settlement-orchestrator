@@ -34,22 +34,22 @@ Built for scale, fault tolerance, and high availability on Google Cloud Platform
 
 ```mermaid
 graph TD
-    Client[Client App / Web] -->|HTTPS POST| API[Go Payment API]
-    API -->|Check Cache| Redis[(Redis: Idempotency)]
-    API -->|1. Route Payment| Router[Payment Router]
+    Client["Client App / Web"] -->|"HTTPS POST"| API["Go Payment API"]
+    API -->|"Check Cache"| Redis[("Redis: Idempotency")]
+    API -->|"1. Route Payment"| Router["Payment Router"]
     
-    Router -->|2. Authorize| PSP_Stripe[Stripe Adapter]
-    Router -->|2. Fallback| PSP_Razor[Razorpay Adapter]
+    Router -->|"2. Authorize"| PSP_Stripe["Stripe Adapter"]
+    Router -->|"2. Fallback"| PSP_Razor["Razorpay Adapter"]
     
-    PSP_Stripe -.->|Webhooks| API
-    PSP_Razor -.->|Webhooks| API
+    PSP_Stripe -.->|"Webhooks"| API
+    PSP_Razor -.->|"Webhooks"| API
     
-    API -->|3. Publish Event| PubSub{GCP Pub/Sub}
-    PubSub -->|Async Subscribe| Worker[Webhook Worker]
+    API -->|"3. Publish Event"| PubSub{"GCP Pub/Sub"}
+    PubSub -->|"Async Subscribe"| Worker["Webhook Worker"]
     
-    Worker -->|4. Record Ledger| Ledger[Double-Entry Ledger]
-    Ledger -->|Atomic TX| DB[(Cloud SQL: Postgres)]
-    API -->|Sync Write| DB
+    Worker -->|"4. Record Ledger"| Ledger["Double-Entry Ledger"]
+    Ledger -->|"Atomic TX"| DB[("Cloud SQL: Postgres")]
+    API -->|"Sync Write"| DB
 ```
 
 ### 2. Cloud Infrastructure Diagram (GCP)
@@ -57,22 +57,22 @@ graph TD
 ```mermaid
 graph TD
     subgraph "Google Cloud Platform"
-        LB[Cloud Load Balancing] -->|Ingress| GKE[GKE Cluster]
+        LB["Cloud Load Balancing"] -->|"Ingress"| GKE["GKE Cluster"]
         
         subgraph "GKE Cluster (VPC)"
-            HPA[Horizontal Pod Autoscaler] --> Pods[App Pods]
-            Pods --> |Workload Identity| SA[Service Account]
-            Pods --> SecretOperator[External Secrets Operator]
-        </subgraph>
+            HPA["Horizontal Pod Autoscaler"] --> Pods["App Pods"]
+            Pods -->|"Workload Identity"| SA["Service Account"]
+            Pods --> SecretOperator["External Secrets Operator"]
+        end
         
-        SA -->|IAM| SecretManager[Secret Manager]
-        SecretManager -.->|Injects Secrets| SecretOperator
+        SA -->|"IAM"| SecretManager["Secret Manager"]
+        SecretManager -.->|"Injects Secrets"| SecretOperator
         
-        Pods -->|Private IP| CloudSQL[(Cloud SQL PostgreSQL HA)]
-        Pods -->|Private IP| Redis[(Memorystore Redis HA)]
-        Pods -->|Publish/Subscribe| PubSub[Pub/Sub Topics]
+        Pods -->|"Private IP"| CloudSQL[("Cloud SQL PostgreSQL HA")]
+        Pods -->|"Private IP"| Redis[("Memorystore Redis HA")]
+        Pods -->|"Publish/Subscribe"| PubSub["Pub/Sub Topics"]
         
-        PubSub -->|DLQ| DLQ[Dead Letter Queue]
+        PubSub -->|"DLQ"| DLQ["Dead Letter Queue"]
     end
 ```
 
@@ -80,16 +80,16 @@ graph TD
 
 ```mermaid
 stateDiagram-v2
-    [*] --> created: API Init
-    created --> authorized: PSP Success
-    created --> failed: PSP Reject/Timeout
+    [*] --> created : "API Init"
+    created --> authorized : "PSP Success"
+    created --> failed : "PSP Reject/Timeout"
     
-    authorized --> captured: Manual/Auto Capture
-    authorized --> voided: Cancelled
+    authorized --> captured : "Manual/Auto Capture"
+    authorized --> voided : "Cancelled"
     
-    captured --> refunded: Partial/Full Refund
-    captured --> settled: Reconciliation Match
-    captured --> dispute: Chargeback
+    captured --> refunded : "Partial/Full Refund"
+    captured --> settled : "Reconciliation Match"
+    captured --> dispute : "Chargeback"
     
     refunded --> settled
 ```
