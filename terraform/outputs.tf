@@ -101,3 +101,20 @@ output "db_password_secret_id" {
   description = "Secret Manager secret ID for the database password"
   value       = google_secret_manager_secret.db_password.secret_id
 }
+
+# ── Memorystore Redis (Phase 3) ────────────────────────────────────────────
+
+output "redis_host" {
+  description = "Memorystore Redis private IP address"
+  value       = google_redis_instance.cache.host
+}
+
+output "redis_port" {
+  description = "Memorystore Redis port"
+  value       = google_redis_instance.cache.port
+}
+
+output "redis_host_secret_id" {
+  description = "Secret Manager secret ID for the Redis host"
+  value       = google_secret_manager_secret.redis_host.secret_id
+}
