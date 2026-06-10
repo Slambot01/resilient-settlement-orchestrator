@@ -1,0 +1,10 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Kubernetes Namespace - Isolates payment system resources
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: payment-system
+  labels:
+    app: payment-orchestrator
+    environment: production

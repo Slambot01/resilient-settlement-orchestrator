@@ -182,3 +182,21 @@ output "secret_razorpay_secret_id" {
   description = "Secret Manager ID for Razorpay key secret"
   value       = google_secret_manager_secret.razorpay_key_secret.secret_id
 }
+
+# ── GKE & Artifact Registry (Phase 6) ──────────────────────────────────────
+
+output "gke_cluster_name" {
+  description = "GKE cluster name"
+  value       = google_container_cluster.primary.name
+}
+
+output "gke_cluster_endpoint" {
+  description = "GKE cluster API endpoint"
+  value       = google_container_cluster.primary.endpoint
+  sensitive   = true
+}
+
+output "artifact_registry_url" {
+  description = "Docker image registry URL for pushing/pulling images"
+  value       = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.app.repository_id}"
+}

@@ -1,0 +1,22 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Kubernetes Service - Exposes the payment app within the cluster
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-orchestrator
+  namespace: payment-system
+  labels:
+    app: payment-orchestrator
+  annotations:
+    # Enable container-native load balancing (GKE routes directly to pods)
+    cloud.google.com/neg: '{"ingress": true}'
+spec:
+  type: ClusterIP
+  selector:
+    app: payment-orchestrator
+  ports:
+    - name: http
+      port: 80
+      targetPort: http # Maps to containerPort 8080
+      protocol: TCP

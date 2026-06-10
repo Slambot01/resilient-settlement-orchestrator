@@ -1,0 +1,54 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Network Policy - Restrict pod-to-pod communication
+# ─────────────────────────────────────────────────────────────────────────────
+# Only allows traffic that the payment app actually needs:
+#   - Ingress from the GCP load balancer on port 8080
+#   - Egress to Cloud SQL Proxy (localhost), Redis, DNS, and internet (PSP APIs)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: payment-orchestrator
+  namespace: payment-system
+  labels:
+    app: payment-orchestrator
+spec:
+  podSelector:
+    matchLabels:
+      app: payment-orchestrator
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    # Allow traffic from GCP load balancer and health checks
+    - ports:
+        - port: 8080
+          protocol: TCP
+
+  egress:
+    # DNS resolution (kube-dns)
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+
+    # Cloud SQL Proxy (runs as sidecar on localhost)
+    - ports:
+        - port: 5432
+          protocol: TCP
+
+    # Redis (Memorystore private IP, port 6379)
+    - ports:
+        - port: 6379
+          protocol: TCP
+
+    # HTTPS outbound (Stripe API, Razorpay API, Google APIs)
+    - ports:
+        - port: 443
+          protocol: TCP
+
+    # HTTP outbound (some webhook callbacks may use HTTP)
+    - ports:
+        - port: 80
+          protocol: TCP

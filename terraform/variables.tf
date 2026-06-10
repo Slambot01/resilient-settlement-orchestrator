@@ -118,3 +118,11 @@ variable "redis_version" {
   type        = string
   default     = "REDIS_7_0"
 }
+
+# ── GKE (Phase 6) ──────────────────────────────────────────────────────────
+
+variable "gke_node_machine_type" {
+  description = "Machine type for GKE worker nodes"
+  type        = string
+  default     = "e2-medium" # 2 vCPU, 4 GB RAM - cost-effective
+}

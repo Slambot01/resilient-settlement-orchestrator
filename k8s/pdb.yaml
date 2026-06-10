@@ -1,0 +1,18 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Pod Disruption Budget - Ensures minimum availability during maintenance
+# ─────────────────────────────────────────────────────────────────────────────
+# During GKE node upgrades, drains, or scaling events, K8s must always
+# keep at least 1 pod running. This prevents all replicas from being
+# evicted simultaneously.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: payment-orchestrator
+  namespace: payment-system
+  labels:
+    app: payment-orchestrator
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: payment-orchestrator

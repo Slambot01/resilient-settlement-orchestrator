@@ -1,0 +1,53 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Kubernetes Ingress - External HTTPS access via GCP Load Balancer
+# ─────────────────────────────────────────────────────────────────────────────
+# Creates a Google Cloud HTTPS Load Balancer that terminates TLS
+# and routes traffic to the payment-orchestrator service.
+#
+# For production with a custom domain:
+#   1. Create a static IP: gcloud compute addresses create payment-ip --global
+#   2. Create a managed SSL cert (uncomment the ManagedCertificate below)
+#   3. Point your DNS A record to the static IP
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: payment-orchestrator
+  namespace: payment-system
+  labels:
+    app: payment-orchestrator
+  annotations:
+    kubernetes.io/ingress.class: "gce"
+    # Uncomment for static IP (create with: gcloud compute addresses create payment-ip --global)
+    # kubernetes.io/ingress.global-static-ip-name: "payment-ip"
+    # Uncomment for managed HTTPS certificate
+    # networking.gke.io/managed-certificates: "payment-cert"
+spec:
+  defaultBackend:
+    service:
+      name: payment-orchestrator
+      port:
+        number: 80
+  rules:
+    # Uncomment and replace with your actual domain
+    # - host: api.yourdomain.com
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: payment-orchestrator
+                port:
+                  number: 80
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# GKE Managed Certificate (uncomment when you have a domain)
+# ─────────────────────────────────────────────────────────────────────────────
+# apiVersion: networking.gke.io/v1
+# kind: ManagedCertificate
+# metadata:
+#   name: payment-cert
+#   namespace: payment-system
+# spec:
+#   domains:
+#     - api.yourdomain.com

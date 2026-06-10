@@ -1,0 +1,192 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Kubernetes Deployment - Payment Orchestrator Application
+# ─────────────────────────────────────────────────────────────────────────────
+# Runs the Go payment app with a Cloud SQL Auth Proxy sidecar.
+# Secrets are injected from the ExternalSecret-synced K8s Secret.
+#
+# Replace PROJECT_ID and REGION with your actual values.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-orchestrator
+  namespace: payment-system
+  labels:
+    app: payment-orchestrator
+    version: v1
+spec:
+  replicas: 2 # Minimum 2 for high availability
+  selector:
+    matchLabels:
+      app: payment-orchestrator
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1        # Add 1 new pod before removing old ones
+      maxUnavailable: 0  # Zero downtime - never remove a pod until new one is ready
+  template:
+    metadata:
+      labels:
+        app: payment-orchestrator
+        version: v1
+    spec:
+      serviceAccountName: payment-app
+      terminationGracePeriodSeconds: 30
+
+      # ── Security Context (Pod Level) ──────────────────────────────────
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 1000
+
+      containers:
+        # ── Application Container ───────────────────────────────────────
+        - name: payment-app
+          image: REGION-docker.pkg.dev/PROJECT_ID/payment-orchestrator-images/payment-orchestrator:latest
+          ports:
+            - containerPort: 8080
+              name: http
+              protocol: TCP
+
+          # ── Environment Variables ─────────────────────────────────────
+          env:
+            # Server config
+            - name: SERVER_ENV
+              value: "production"
+            - name: SERVER_PORT
+              value: "8080"
+            # Database - connects via Cloud SQL Proxy sidecar on localhost
+            - name: DB_HOST
+              value: "localhost"
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_USER
+              value: "payment_user"
+            - name: DB_NAME
+              value: "payment_orchestrator"
+            - name: DB_SSL_MODE
+              value: "disable" # SSL handled by Cloud SQL Proxy
+            - name: DB_MAX_CONNS
+              value: "25"
+            - name: DB_MIN_CONNS
+              value: "5"
+            # Redis - private IP from Memorystore
+            - name: REDIS_PORT
+              value: "6379"
+            - name: REDIS_DB
+              value: "0"
+            # Pub/Sub
+            - name: PUBSUB_ENABLED
+              value: "true"
+            - name: PUBSUB_PROJECT_ID
+              value: "PROJECT_ID"
+            - name: PUBSUB_WEBHOOK_TOPIC
+              value: "webhook-events"
+            - name: PUBSUB_EVENT_TOPIC
+              value: "payment-state-changes"
+            - name: PUBSUB_SUBSCRIPTION
+              value: "webhook-processor"
+            - name: PUBSUB_DLQ_TOPIC
+              value: "webhook-events-dlq"
+            - name: PUBSUB_DLQ_SUBSCRIPTION
+              value: "webhook-dlq-reader"
+            - name: PUBSUB_MAX_RETRIES
+              value: "5"
+            # Logging
+            - name: LOG_LEVEL
+              value: "info"
+            - name: LOG_FORMAT
+              value: "json"
+
+          # Secrets from External Secrets Operator (synced from GCP Secret Manager)
+          envFrom:
+            - secretRef:
+                name: payment-app-secrets
+
+          # ── Resource Limits ───────────────────────────────────────────
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+          # ── Health Probes ─────────────────────────────────────────────
+          # Matches our Go health endpoints in internal/handler/health.go
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          # ── Security Context (Container Level) ────────────────────────
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+
+          # Writable tmp for the Go binary (if needed for temp files)
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+        # ── Cloud SQL Auth Proxy Sidecar ────────────────────────────────
+        # Provides encrypted, authenticated connections to Cloud SQL.
+        # The app connects to localhost:5432, the proxy tunnels to Cloud SQL.
+        # Uses Workload Identity - no JSON key files needed.
+        - name: cloud-sql-proxy
+          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.3
+          args:
+            - "--structured-logs"
+            - "--port=5432"
+            - "PROJECT_ID:REGION:payment-orchestrator-production-db"
+          ports:
+            - containerPort: 5432
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+
+      volumes:
+        - name: tmp
+          emptyDir: {}
+
+      # ── Pod Anti-Affinity ─────────────────────────────────────────────
+      # Spread replicas across different nodes for HA
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - payment-orchestrator
+                topologyKey: kubernetes.io/hostname
