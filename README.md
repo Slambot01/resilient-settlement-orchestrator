@@ -1,6 +1,6 @@
 # Resilient Settlement Orchestrator
 
-A production-grade **Payment Orchestration and Ledger System** built in Go that handles multi-PSP routing, double-entry bookkeeping, asynchronous webhook management, and automated reconciliation — with full distributed tracing, metrics, and Helm-based Kubernetes deployment.
+A production-grade **Payment Orchestration and Ledger System** built in Go that handles multi-PSP routing, double-entry bookkeeping, asynchronous webhook management, and automated reconciliation - with full distributed tracing, metrics, and Helm-based Kubernetes deployment.
 
 Built for scale, fault tolerance, and high availability on Google Cloud Platform using Google Kubernetes Engine, Cloud SQL, and Pub/Sub.
 
@@ -243,11 +243,11 @@ Access the Jaeger UI at **http://localhost:16686** to see waterfall trace visual
 
 ### Prometheus + Grafana (Metrics & Dashboards)
 The Go app exposes 15+ custom metrics on a separate internal port (`:9091`):
-- `payment_requests_total` — Counter of all payment operations by type and status
-- `http_request_duration_seconds` — Histogram of API latency (P50, P90, P99)
-- `circuit_breaker_trips_total` — Counter of circuit breaker activations per PSP
-- `webhook_processing_duration_seconds` — Histogram of webhook processing time
-- `go_goroutines` — Active goroutine count
+- `payment_requests_total` - Counter of all payment operations by type and status
+- `http_request_duration_seconds` - Histogram of API latency (P50, P90, P99)
+- `circuit_breaker_trips_total` - Counter of circuit breaker activations per PSP
+- `webhook_processing_duration_seconds` - Histogram of webhook processing time
+- `go_goroutines` - Active goroutine count
 
 Access Grafana at **http://localhost:3000** (admin/admin) with a pre-provisioned **Payment Orchestrator** dashboard.
 
@@ -292,9 +292,9 @@ curl -X POST http://localhost:8080/v1/payments \
 | Service | URL | Credentials |
 |---------|-----|-------------|
 | **Payment API** | http://localhost:8080 | `Authorization: Bearer dev-admin-key` |
-| **Jaeger (Tracing)** | http://localhost:16686 | — |
+| **Jaeger (Tracing)** | http://localhost:16686 | - |
 | **Grafana (Dashboards)** | http://localhost:3000 | admin / admin |
-| **Prometheus** | http://localhost:9090 | — |
+| **Prometheus** | http://localhost:9090 | - |
 
 ## Helm Chart Deployment
 
