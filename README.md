@@ -79,11 +79,6 @@ graph LR
     style Grafana fill:#f80,stroke:#333,color:#fff
 ```
 
-> **How it works:**
-> - **OpenTelemetry SDK** instruments the Go code and exports trace spans via OTLP/HTTP to **Jaeger** for distributed tracing visualization.
-> - **Prometheus** scrapes the internal `/metrics` endpoint on port `9091` every 5 seconds.
-> - **Grafana** reads from Prometheus to render real-time dashboards (Payment Throughput, P99 Latency, Circuit Breaker status, etc.).
-
 ### 3. Cloud Infrastructure Diagram (GCP)
 
 ```mermaid
