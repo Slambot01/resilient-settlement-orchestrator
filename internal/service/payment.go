@@ -8,12 +8,17 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/adapter"
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/models"
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/pkg/retry"
+	"github.com/Slambot01/resilient-settlement-orchestrator/internal/pkg/tracing"
 	appPubSub "github.com/Slambot01/resilient-settlement-orchestrator/internal/pubsub"
 )
+
+var paymentTracer = tracing.Tracer("service.payment")
 
 type PaymentService struct {
 	db     *pgxpool.Pool
@@ -33,14 +38,32 @@ func NewPaymentService(db *pgxpool.Pool, router *PaymentRouter, ledger *LedgerSe
 
 // CreatePayment handles the initial payment creation flow.
 func (s *PaymentService) CreatePayment(ctx context.Context, req models.CreatePaymentRequest) (*models.PaymentResponse, error) {
+	ctx, span := paymentTracer.Start(ctx, "payment.create")
+	defer span.End()
+
 	paymentID := uuid.NewString()
 	now := time.Now().UTC()
+
+	span.SetAttributes(
+		attribute.String("payment.id", paymentID),
+		attribute.Int64("payment.amount", req.Amount),
+		attribute.String("payment.currency", req.Currency),
+		attribute.String("payment.merchant_id", req.MerchantID),
+	)
 
 	// 1. Route the payment
 	decision, pspAdapter, err := s.router.Route(ctx, req)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("routing payment: %w", err)
 	}
+
+	span.SetAttributes(
+		attribute.String("payment.psp", string(decision.SelectedPSP)),
+		attribute.String("payment.routing_rule", decision.RuleName),
+		attribute.String("payment.routing_reason", decision.Reason),
+	)
 
 	// 2. Insert initial payment record (Created) within a tx
 	tx, err := s.db.Begin(ctx)
@@ -122,6 +145,8 @@ func (s *PaymentService) CreatePayment(ctx context.Context, req models.CreatePay
 	}
 
 	if pspErr != nil {
+		span.RecordError(pspErr)
+		span.SetStatus(codes.Error, pspErr.Error())
 		return nil, fmt.Errorf("psp failed: %w", pspErr)
 	}
 
@@ -223,6 +248,10 @@ func (s *PaymentService) updatePaymentState(ctx context.Context, paymentID strin
 // CapturePayment captures an authorized payment.
 // Uses SELECT FOR UPDATE to prevent concurrent capture race conditions (V-019 fix).
 func (s *PaymentService) CapturePayment(ctx context.Context, id string) (*models.PaymentResponse, error) {
+	ctx, span := paymentTracer.Start(ctx, "payment.capture")
+	span.SetAttributes(attribute.String("payment.id", id))
+	defer span.End()
+
 	// Start transaction — need row lock before PSP call
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -291,6 +320,13 @@ func (s *PaymentService) CapturePayment(ctx context.Context, id string) (*models
 // RefundPayment refunds a captured payment with over-refund protection.
 // Uses SELECT FOR UPDATE to prevent concurrent refund race conditions (V-002 fix).
 func (s *PaymentService) RefundPayment(ctx context.Context, id string, amount int64) (*models.PaymentResponse, error) {
+	ctx, span := paymentTracer.Start(ctx, "payment.refund")
+	span.SetAttributes(
+		attribute.String("payment.id", id),
+		attribute.Int64("payment.refund_amount", amount),
+	)
+	defer span.End()
+
 	// Start transaction early — we need row-level locking before any PSP call
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -374,6 +410,10 @@ func (s *PaymentService) RefundPayment(ctx context.Context, id string, amount in
 
 // CancelPayment cancels an authorized payment.
 func (s *PaymentService) CancelPayment(ctx context.Context, id string) (*models.PaymentResponse, error) {
+	ctx, span := paymentTracer.Start(ctx, "payment.cancel")
+	span.SetAttributes(attribute.String("payment.id", id))
+	defer span.End()
+
 	p, err := s.GetPayment(ctx, id)
 	if err != nil {
 		return nil, err

@@ -2,6 +2,9 @@ package adapter
 
 import (
 	"context"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // PSPPaymentRequest is the normalized input to any PSP.
@@ -52,3 +55,9 @@ type PSPAdapter interface {
 
 	VerifyWebhookSignature(payload []byte, signature string) error
 }
+
+// traceAttrs is a convenience function that wraps attributes into a SpanStartOption.
+func traceAttrs(attrs ...attribute.KeyValue) trace.SpanStartOption {
+	return trace.WithAttributes(attrs...)
+}
+

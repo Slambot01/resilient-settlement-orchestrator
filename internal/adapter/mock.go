@@ -11,6 +11,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+
+	"github.com/Slambot01/resilient-settlement-orchestrator/internal/pkg/tracing"
 )
 
 // MockConfig controls simulated PSP behavior.
@@ -30,6 +34,8 @@ func DefaultMockConfig() MockConfig {
 	}
 }
 
+var mockTracer = tracing.Tracer("psp.mock")
+
 type MockPSP struct {
 	cfg MockConfig
 	mu  sync.Mutex
@@ -46,14 +52,25 @@ func NewMockPSP(cfg MockConfig) *MockPSP {
 func (m *MockPSP) Name() string { return "mock" }
 
 func (m *MockPSP) CreatePayment(ctx context.Context, req PSPPaymentRequest) (*PSPPaymentResponse, error) {
+	ctx, span := mockTracer.Start(ctx, "psp.mock.create_payment",
+		traceAttrs(attribute.Int64("psp.amount", req.Amount), attribute.String("psp.currency", req.Currency)),
+	)
+	defer span.End()
+
 	m.simulateLatency()
 
 	if !m.shouldSucceed() {
-		return nil, fmt.Errorf("mock psp: simulated payment failure for order %s", req.OrderID)
+		err := fmt.Errorf("mock psp: simulated payment failure for order %s", req.OrderID)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
 	}
 
+	pspID := "mock_pay_" + uuid.NewString()[:8]
+	span.SetAttributes(attribute.String("psp.payment_id", pspID))
+
 	return &PSPPaymentResponse{
-		PSPPaymentID: "mock_pay_" + uuid.NewString()[:8],
+		PSPPaymentID: pspID,
 		Status:       "authorized",
 		RawResponse: map[string]interface{}{
 			"mock":   true,
@@ -63,10 +80,18 @@ func (m *MockPSP) CreatePayment(ctx context.Context, req PSPPaymentRequest) (*PS
 }
 
 func (m *MockPSP) CapturePayment(ctx context.Context, pspPaymentID string, amount int64, currency string) (*PSPCaptureResponse, error) {
+	_, span := mockTracer.Start(ctx, "psp.mock.capture",
+		traceAttrs(attribute.String("psp.payment_id", pspPaymentID), attribute.Int64("psp.amount", amount)),
+	)
+	defer span.End()
+
 	m.simulateLatency()
 
 	if !m.shouldSucceed() {
-		return nil, fmt.Errorf("mock psp: simulated capture failure for %s", pspPaymentID)
+		err := fmt.Errorf("mock psp: simulated capture failure for %s", pspPaymentID)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
 	}
 
 	return &PSPCaptureResponse{
@@ -76,10 +101,18 @@ func (m *MockPSP) CapturePayment(ctx context.Context, pspPaymentID string, amoun
 }
 
 func (m *MockPSP) RefundPayment(ctx context.Context, pspPaymentID string, amount int64) (*PSPRefundResponse, error) {
+	_, span := mockTracer.Start(ctx, "psp.mock.refund",
+		traceAttrs(attribute.String("psp.payment_id", pspPaymentID), attribute.Int64("psp.refund_amount", amount)),
+	)
+	defer span.End()
+
 	m.simulateLatency()
 
 	if !m.shouldSucceed() {
-		return nil, fmt.Errorf("mock psp: simulated refund failure for %s", pspPaymentID)
+		err := fmt.Errorf("mock psp: simulated refund failure for %s", pspPaymentID)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
 	}
 
 	return &PSPRefundResponse{
@@ -91,15 +124,28 @@ func (m *MockPSP) RefundPayment(ctx context.Context, pspPaymentID string, amount
 }
 
 func (m *MockPSP) CancelPayment(ctx context.Context, pspPaymentID string) error {
+	_, span := mockTracer.Start(ctx, "psp.mock.cancel",
+		traceAttrs(attribute.String("psp.payment_id", pspPaymentID)),
+	)
+	defer span.End()
+
 	m.simulateLatency()
 
 	if !m.shouldSucceed() {
-		return fmt.Errorf("mock psp: simulated cancel failure for %s", pspPaymentID)
+		err := fmt.Errorf("mock psp: simulated cancel failure for %s", pspPaymentID)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return err
 	}
 	return nil
 }
 
 func (m *MockPSP) GetPaymentStatus(ctx context.Context, pspPaymentID string) (*PSPStatusResponse, error) {
+	_, span := mockTracer.Start(ctx, "psp.mock.get_status",
+		traceAttrs(attribute.String("psp.payment_id", pspPaymentID)),
+	)
+	defer span.End()
+
 	m.simulateLatency()
 
 	return &PSPStatusResponse{

@@ -20,6 +20,7 @@ import (
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/middleware"
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/models"
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/pkg/metrics"
+	"github.com/Slambot01/resilient-settlement-orchestrator/internal/pkg/tracing"
 	appPubSub "github.com/Slambot01/resilient-settlement-orchestrator/internal/pubsub"
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/service"
 )
@@ -49,6 +50,21 @@ func main() {
 	slog.SetDefault(logger)
 
 	ctx := context.Background()
+
+	// ── Initialize OpenTelemetry tracing ────────────────────────────
+	tracingCfg := tracing.Config{
+		Enabled:    cfg.Tracing.Enabled,
+		Endpoint:   cfg.Tracing.Endpoint,
+		SampleRate: cfg.Tracing.SampleRate,
+		Env:        cfg.Server.Env,
+	}
+	tp, err := tracing.InitTracer(ctx, "payment-orchestrator", tracingCfg)
+	if err != nil {
+		logger.Error("failed to initialize tracing", slog.Any("error", err))
+		// Non-fatal: continue without tracing
+	} else {
+		defer tp.Shutdown(ctx)
+	}
 
 	// ── Run database migrations ─────────────────────────────────────
 	if err := database.RunMigrations(cfg.Database, "migrations"); err != nil {
@@ -174,6 +190,7 @@ func main() {
 
 	// Global middleware
 	r.Use(chimw.RequestID)
+	r.Use(tracing.HTTPMiddleware("payment-orchestrator")) // OTel distributed tracing
 	r.Use(middleware.RealIPFromTrustedProxy) // V-027: only trust X-Forwarded-For from known proxies
 	r.Use(middleware.CORS(middleware.DefaultCORSConfig()))
 	r.Use(middleware.SecurityHeaders) // HSTS, CSP, X-Frame-Options, etc.
@@ -268,6 +285,20 @@ func main() {
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGTERM)
 
+	// ── Start internal metrics server (for Prometheus scraping) ─────
+	metricsMux := http.NewServeMux()
+	metricsMux.HandleFunc("/metrics", metrics.Handler())
+	metricsServer := &http.Server{
+		Addr:    ":9091",
+		Handler: metricsMux,
+	}
+	go func() {
+		logger.Info("internal metrics server starting", slog.Int("port", 9091))
+		if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("metrics server failed", slog.Any("error", err))
+		}
+	}()
+
 	go func() {
 		logger.Info("server starting",
 			slog.Int("port", cfg.Server.Port),
@@ -288,6 +319,11 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		logger.Error("server forced to shutdown", slog.Any("error", err))
 		os.Exit(1)
+	}
+
+	// Shutdown internal metrics server
+	if err := metricsServer.Shutdown(ctx); err != nil {
+		logger.Error("metrics server forced to shutdown", slog.Any("error", err))
 	}
 
 	logger.Info("server stopped gracefully")

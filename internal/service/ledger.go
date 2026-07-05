@@ -8,9 +8,16 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/models"
+	"github.com/Slambot01/resilient-settlement-orchestrator/internal/pkg/tracing"
 )
+
+var ledgerTracer = tracing.Tracer("service.ledger")
+
 
 type LedgerService struct {
 	db *pgxpool.Pool
@@ -23,8 +30,20 @@ func NewLedgerService(db *pgxpool.Pool) *LedgerService {
 // PostLedgerTransaction records a double-entry ledger transaction.
 // It uses row-level locking (SELECT FOR UPDATE) to ensure concurrent balance updates are atomic.
 func (s *LedgerService) PostLedgerTransaction(ctx context.Context, req models.PostTransactionRequest) error {
+	ctx, span := ledgerTracer.Start(ctx, "ledger.post_transaction",
+		trace.WithAttributes(
+			attribute.String("ledger.payment_id", req.PaymentID),
+			attribute.String("ledger.transaction_type", req.TransactionType),
+			attribute.Int("ledger.entry_count", len(req.Entries)),
+		),
+	)
+	defer span.End()
+
 	if len(req.Entries) < 2 {
-		return fmt.Errorf("ledger transaction requires at least 2 entries for double-entry bookkeeping")
+		err := fmt.Errorf("ledger transaction requires at least 2 entries for double-entry bookkeeping")
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return err
 	}
 
 	// 1. Validate double entry principle

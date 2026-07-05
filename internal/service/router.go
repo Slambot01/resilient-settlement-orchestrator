@@ -6,10 +6,16 @@ import (
 	"log/slog"
 	"sync"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/adapter"
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/models"
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/pkg/circuitbreaker"
+	"github.com/Slambot01/resilient-settlement-orchestrator/internal/pkg/tracing"
 )
+
+var routerTracer = tracing.Tracer("service.router")
 
 type PaymentRouter struct {
 	mu       sync.RWMutex
@@ -96,6 +102,9 @@ func (r *PaymentRouter) GetBreakerStats() map[string]circuitbreaker.Stats {
 // Route selects the best PSP, respecting circuit breaker state.
 // If the primary PSP's breaker is open, it falls back automatically.
 func (r *PaymentRouter) Route(ctx context.Context, req models.CreatePaymentRequest) (*models.RoutingDecision, adapter.PSPAdapter, error) {
+	_, span := routerTracer.Start(ctx, "payment.route.select")
+	defer span.End()
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -104,6 +113,10 @@ func (r *PaymentRouter) Route(ctx context.Context, req models.CreatePaymentReque
 		pref := models.PSPName(req.RoutingPreferences.PreferredPSP)
 		if adp, ok := r.adapters[pref]; ok {
 			if r.isAvailable(pref) {
+				span.SetAttributes(
+					attribute.String("psp.selected", string(pref)),
+					attribute.String("routing.reason", "merchant_preference"),
+				)
 				return &models.RoutingDecision{
 					SelectedPSP: pref,
 					Reason:      "merchant_preference",
@@ -125,6 +138,12 @@ func (r *PaymentRouter) Route(ctx context.Context, req models.CreatePaymentReque
 		// Try primary PSP
 		if r.isAvailable(rule.PrimaryPSP) {
 			if adp, ok := r.adapters[rule.PrimaryPSP]; ok {
+				span.SetAttributes(
+					attribute.String("psp.selected", string(rule.PrimaryPSP)),
+					attribute.String("psp.fallback", string(rule.FallbackPSP)),
+					attribute.String("routing.reason", "rule_match"),
+					attribute.String("routing.rule", rule.Name),
+				)
 				return &models.RoutingDecision{
 					SelectedPSP: rule.PrimaryPSP,
 					FallbackPSP: rule.FallbackPSP,
@@ -165,6 +184,7 @@ func (r *PaymentRouter) Route(ctx context.Context, req models.CreatePaymentReque
 }
 
 func (r *PaymentRouter) isAvailable(psp models.PSPName) bool {
+	_ = codes.Error // keep import alive for future use
 	cb, ok := r.breakers[psp]
 	if !ok {
 		return true

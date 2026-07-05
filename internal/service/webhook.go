@@ -10,10 +10,15 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/adapter"
 	"github.com/Slambot01/resilient-settlement-orchestrator/internal/models"
+	"github.com/Slambot01/resilient-settlement-orchestrator/internal/pkg/tracing"
 )
+
+var webhookTracer = tracing.Tracer("service.webhook")
 
 type WebhookService struct {
 	db       *pgxpool.Pool
@@ -47,10 +52,22 @@ func (s *WebhookService) IngestWebhook(ctx context.Context, psp, eventType strin
 }
 
 func (s *WebhookService) ingestWebhookInternal(ctx context.Context, psp, eventType string, payload []byte, signature string, skipSigVerify bool) error {
+	ctx, span := webhookTracer.Start(ctx, "webhook.ingest")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("webhook.psp", psp),
+		attribute.String("webhook.event_type", eventType),
+		attribute.Bool("webhook.is_retry", skipSigVerify),
+	)
+
 	// 1. Verify signature (unless this is a DLQ retry)
 	pspAdapter, ok := s.adapters[psp]
 	if !ok {
-		return fmt.Errorf("unknown psp: %s", psp)
+		err := fmt.Errorf("unknown psp: %s", psp)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return err
 	}
 
 	if !skipSigVerify {
@@ -153,8 +170,15 @@ func (s *WebhookService) ingestWebhookInternal(ctx context.Context, psp, eventTy
 // If any step fails, PostgreSQL rolls back the entire operation.
 // The PSP will retry the webhook on a non-200 response.
 func (s *WebhookService) processCaptureWebhook(ctx context.Context, paymentID, pspPaymentID string) error {
+	ctx, span := webhookTracer.Start(ctx, "webhook.process.capture")
+	defer span.End()
+	span.SetAttributes(attribute.String("payment.id", paymentID))
+
 	if paymentID == "" {
-		return fmt.Errorf("cannot process capture: no internal payment ID")
+		err := fmt.Errorf("cannot process capture: no internal payment ID")
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return err
 	}
 
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})

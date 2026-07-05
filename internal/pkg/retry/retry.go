@@ -8,6 +8,12 @@ import (
 	"math"
 	"math/rand"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/Slambot01/resilient-settlement-orchestrator/internal/pkg/tracing"
 )
 
 type Config struct {
@@ -29,19 +35,40 @@ func DefaultConfig() Config {
 // RetryableFunc is any operation that can be retried.
 type RetryableFunc func(ctx context.Context) error
 
+var tracer = tracing.Tracer("retry")
+
 // Do executes fn with exponential backoff. Returns nil on first success.
 // Non-retryable errors (wrapped with ErrNonRetryable) abort immediately.
+// Each attempt is wrapped in an OpenTelemetry span for distributed tracing.
 func Do(ctx context.Context, cfg Config, operationName string, fn RetryableFunc) error {
 	var lastErr error
 
 	for attempt := 0; attempt < cfg.MaxAttempts; attempt++ {
-		lastErr = fn(ctx)
+		// Create a span for each retry attempt.
+		attemptCtx, span := tracer.Start(ctx, fmt.Sprintf("retry.attempt.%d", attempt+1),
+			trace.WithAttributes(
+				attribute.Int("retry.attempt_number", attempt+1),
+				attribute.Int("retry.max_attempts", cfg.MaxAttempts),
+				attribute.String("retry.operation", operationName),
+			),
+		)
+
+		lastErr = fn(attemptCtx)
+
 		if lastErr == nil {
+			span.SetAttributes(attribute.Bool("retry.success", true))
+			span.End()
 			return nil
 		}
 
+		// Record the error on the span.
+		span.RecordError(lastErr)
+		span.SetAttributes(attribute.Bool("retry.success", false))
+
 		// Check if error is explicitly non-retryable
 		if IsNonRetryable(lastErr) {
+			span.SetStatus(codes.Error, "non-retryable error")
+			span.End()
 			slog.Warn("non-retryable error, aborting",
 				slog.String("operation", operationName),
 				slog.Int("attempt", attempt+1),
@@ -49,6 +76,9 @@ func Do(ctx context.Context, cfg Config, operationName string, fn RetryableFunc)
 			)
 			return lastErr
 		}
+
+		span.SetStatus(codes.Error, "attempt failed, will retry")
+		span.End()
 
 		// Don't wait after the last attempt
 		if attempt == cfg.MaxAttempts-1 {

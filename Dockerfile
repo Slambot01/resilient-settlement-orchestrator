@@ -46,8 +46,8 @@ RUN chown -R app:app /app
 ENV SERVER_ENV=production
 ENV SERVER_PORT=8080
 
-# Expose port
-EXPOSE 8080
+# Expose ports: 8080 (API), 9091 (internal metrics for Prometheus)
+EXPOSE 8080 9091
 
 # Run as non-root user
 USER app

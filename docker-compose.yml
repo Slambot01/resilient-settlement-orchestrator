@@ -2,7 +2,6 @@
 # DEVELOPMENT ONLY — DO NOT use this file for staging or production.
 # For production, use Kubernetes manifests with secrets from GCP Secret Manager.
 # ============================================================================
-version: "3.9"
 
 services:
   app:
@@ -21,12 +20,18 @@ services:
       - PUBSUB_EMULATOR_HOST=pubsub-emulator:8085
       - PUBSUB_PROJECT_ID=local-dev
       - PUBSUB_ENABLED=true
+      # OpenTelemetry tracing → Jaeger
+      - TRACING_ENABLED=true
+      - TRACING_ENDPOINT=http://jaeger:4318
+      - TRACING_SAMPLE_RATE=1.0
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       pubsub-emulator:
+        condition: service_started
+      jaeger:
         condition: service_started
 
   postgres:
@@ -71,6 +76,49 @@ services:
     ports:
       - "127.0.0.1:8085:8085"
 
+  # ── Observability Stack ──────────────────────────────────────────
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.76.0
+    container_name: payment_jaeger
+    restart: unless-stopped
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4318:4318"     # OTLP HTTP receiver
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+
+  prometheus:
+    image: prom/prometheus:v3.4.1
+    container_name: payment_prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - app
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    container_name: payment_grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
 volumes:
   pgdata:
   redisdata:
+  prometheus_data:
+  grafana_data:

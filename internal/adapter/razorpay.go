@@ -8,6 +8,10 @@ import (
 	"fmt"
 
 	razorpay "github.com/razorpay/razorpay-go"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+
+	"github.com/Slambot01/resilient-settlement-orchestrator/internal/pkg/tracing"
 )
 
 // RazorpayAdapter wraps the Razorpay SDK behind the PSPAdapter interface.
@@ -16,6 +20,8 @@ type RazorpayAdapter struct {
 	client        *razorpay.Client
 	webhookSecret string
 }
+
+var razorpayTracer = tracing.Tracer("psp.razorpay")
 
 func NewRazorpayAdapter(keyID, keySecret, webhookSecret string) *RazorpayAdapter {
 	client := razorpay.NewClient(keyID, keySecret)
@@ -28,6 +34,11 @@ func NewRazorpayAdapter(keyID, keySecret, webhookSecret string) *RazorpayAdapter
 func (r *RazorpayAdapter) Name() string { return "razorpay" }
 
 func (r *RazorpayAdapter) CreatePayment(ctx context.Context, req PSPPaymentRequest) (*PSPPaymentResponse, error) {
+	ctx, span := razorpayTracer.Start(ctx, "psp.razorpay.create_payment",
+		traceAttrs(attribute.Int64("psp.amount", req.Amount), attribute.String("psp.currency", req.Currency)),
+	)
+	defer span.End()
+
 	// Razorpay requires creating an Order first, then the payment happens client-side.
 	data := map[string]interface{}{
 		"amount":   req.Amount,
@@ -41,11 +52,15 @@ func (r *RazorpayAdapter) CreatePayment(ctx context.Context, req PSPPaymentReque
 
 	body, err := r.client.Order.Create(data, nil)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("razorpay create order: %w", err)
 	}
 
 	orderID, _ := body["id"].(string)
 	status, _ := body["status"].(string)
+
+	span.SetAttributes(attribute.String("psp.payment_id", orderID), attribute.String("psp.status", status))
 
 	return &PSPPaymentResponse{
 		PSPPaymentID: orderID,
@@ -55,16 +70,24 @@ func (r *RazorpayAdapter) CreatePayment(ctx context.Context, req PSPPaymentReque
 }
 
 func (r *RazorpayAdapter) CapturePayment(ctx context.Context, pspPaymentID string, amount int64, currency string) (*PSPCaptureResponse, error) {
+	_, span := razorpayTracer.Start(ctx, "psp.razorpay.capture",
+		traceAttrs(attribute.String("psp.payment_id", pspPaymentID), attribute.Int64("psp.amount", amount)),
+	)
+	defer span.End()
+
 	extra := map[string]interface{}{
 		"currency": currency, // V-018 fix: use actual payment currency instead of hardcoded INR
 	}
 
 	body, err := r.client.Payment.Capture(pspPaymentID, int(amount), extra, nil)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("razorpay capture: %w", err)
 	}
 
 	status, _ := body["status"].(string)
+	span.SetAttributes(attribute.String("psp.status", status))
 
 	return &PSPCaptureResponse{
 		PSPPaymentID: pspPaymentID,
@@ -73,6 +96,11 @@ func (r *RazorpayAdapter) CapturePayment(ctx context.Context, pspPaymentID strin
 }
 
 func (r *RazorpayAdapter) RefundPayment(ctx context.Context, pspPaymentID string, amount int64) (*PSPRefundResponse, error) {
+	_, span := razorpayTracer.Start(ctx, "psp.razorpay.refund",
+		traceAttrs(attribute.String("psp.payment_id", pspPaymentID), attribute.Int64("psp.refund_amount", amount)),
+	)
+	defer span.End()
+
 	data := map[string]interface{}{
 		"payment_id": pspPaymentID,
 	}
@@ -82,12 +110,16 @@ func (r *RazorpayAdapter) RefundPayment(ctx context.Context, pspPaymentID string
 
 	body, err := r.client.Refund.Create(data, nil)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("razorpay refund: %w", err)
 	}
 
 	refundID, _ := body["id"].(string)
 	refundAmount, _ := body["amount"].(float64)
 	status, _ := body["status"].(string)
+
+	span.SetAttributes(attribute.String("psp.refund_id", refundID), attribute.String("psp.status", status))
 
 	return &PSPRefundResponse{
 		PSPRefundID:  refundID,
@@ -104,8 +136,15 @@ func (r *RazorpayAdapter) CancelPayment(ctx context.Context, pspPaymentID string
 }
 
 func (r *RazorpayAdapter) GetPaymentStatus(ctx context.Context, pspPaymentID string) (*PSPStatusResponse, error) {
+	_, span := razorpayTracer.Start(ctx, "psp.razorpay.get_status",
+		traceAttrs(attribute.String("psp.payment_id", pspPaymentID)),
+	)
+	defer span.End()
+
 	body, err := r.client.Payment.Fetch(pspPaymentID, nil, nil)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("razorpay get status: %w", err)
 	}
 

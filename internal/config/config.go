@@ -13,6 +13,7 @@ type Config struct {
 	Database DatabaseConfig
 	Redis    RedisConfig
 	PubSub   PubSubConfig
+	Tracing  TracingConfig
 	Log      LogConfig
 	Auth     AuthConfig
 }
@@ -66,6 +67,13 @@ type PubSubConfig struct {
 	Enabled        bool
 }
 
+// TracingConfig holds OpenTelemetry distributed tracing settings.
+type TracingConfig struct {
+	Enabled    bool
+	Endpoint   string  // OTLP HTTP endpoint (e.g., "http://jaeger:4318")
+	SampleRate float64 // 0.0–1.0, fraction of traces to sample
+}
+
 // DSN returns the PostgreSQL connection string.
 func (d DatabaseConfig) DSN() string {
 	return fmt.Sprintf(
@@ -115,6 +123,11 @@ func Load() *Config {
 			MaxRetries:     getEnvInt("PUBSUB_MAX_RETRIES", 5),
 			Enabled:        getEnv("PUBSUB_ENABLED", "false") == "true",
 		},
+		Tracing: TracingConfig{
+			Enabled:    getEnv("TRACING_ENABLED", "false") == "true",
+			Endpoint:   getEnv("TRACING_ENDPOINT", "http://localhost:4318"),
+			SampleRate: getEnvFloat("TRACING_SAMPLE_RATE", 1.0),
+		},
 	}
 
 	// Fail fast in production if critical secrets are missing
@@ -145,6 +158,15 @@ func getEnvInt(key string, fallback int) int {
 	if value, ok := os.LookupEnv(key); ok {
 		if intVal, err := strconv.Atoi(value); err == nil {
 			return intVal
+		}
+	}
+	return fallback
+}
+
+func getEnvFloat(key string, fallback float64) float64 {
+	if value, ok := os.LookupEnv(key); ok {
+		if f, err := strconv.ParseFloat(value, 64); err == nil {
+			return f
 		}
 	}
 	return fallback
