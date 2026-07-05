@@ -1,0 +1,48 @@
+──────────────────────────────────────────────────────────────────────
+  🎉 Payment Orchestrator deployed successfully!
+──────────────────────────────────────────────────────────────────────
+
+  Release:   {{ .Release.Name }}
+  Namespace: {{ .Release.Namespace }}
+  Version:   {{ .Chart.AppVersion }}
+
+──────────────────────────────────────────────────────────────────────
+  📡 Access the API
+──────────────────────────────────────────────────────────────────────
+
+{{- if .Values.ingress.enabled }}
+{{- if .Values.ingress.host }}
+  External:  https://{{ .Values.ingress.host }}
+{{- else }}
+  External:  Waiting for GCP load balancer IP...
+             kubectl get ingress {{ include "payment-orchestrator.fullname" . }} -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+{{- end }}
+{{- end }}
+
+  In-cluster: http://{{ include "payment-orchestrator.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}
+
+──────────────────────────────────────────────────────────────────────
+  🔍 Useful Commands
+──────────────────────────────────────────────────────────────────────
+
+  # Check pod status
+  kubectl get pods -n {{ .Release.Namespace }} -l app=payment-orchestrator
+
+  # View application logs
+  kubectl logs -n {{ .Release.Namespace }} -l app=payment-orchestrator -c payment-app --tail=50
+
+  # Health check
+  kubectl exec -n {{ .Release.Namespace }} deploy/{{ include "payment-orchestrator.fullname" . }} -c payment-app -- wget -qO- http://localhost:{{ .Values.service.targetPort }}/healthz
+
+  # View HPA status
+  kubectl get hpa -n {{ .Release.Namespace }}
+
+{{- if .Values.tracing.enabled }}
+
+──────────────────────────────────────────────────────────────────────
+  📊 Observability
+──────────────────────────────────────────────────────────────────────
+
+  Tracing endpoint: {{ .Values.tracing.endpoint }}
+  Metrics port:     {{ .Values.service.metricsPort }} (Prometheus scrape target)
+{{- end }}

@@ -1,0 +1,17 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# PDB — Ensures minimum availability during maintenance
+# ─────────────────────────────────────────────────────────────────────────────
+{{- if .Values.pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "payment-orchestrator.fullname" . }}
+  namespace: {{ include "payment-orchestrator.namespace" . }}
+  labels:
+    {{- include "payment-orchestrator.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "payment-orchestrator.selectorLabels" . | nindent 6 }}
+{{- end }}

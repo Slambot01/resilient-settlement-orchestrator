@@ -1,0 +1,10 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Namespace — isolates payment system resources
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ include "payment-orchestrator.namespace" . }}
+  labels:
+    {{- include "payment-orchestrator.labels" . | nindent 4 }}
+    environment: {{ .Values.env.SERVER_ENV | default "production" }}

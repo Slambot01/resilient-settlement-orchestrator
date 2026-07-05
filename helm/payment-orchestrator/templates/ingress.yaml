@@ -1,0 +1,64 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Ingress — External HTTPS access via GCP Load Balancer
+# ─────────────────────────────────────────────────────────────────────────────
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "payment-orchestrator.fullname" . }}
+  namespace: {{ include "payment-orchestrator.namespace" . }}
+  labels:
+    {{- include "payment-orchestrator.labels" . | nindent 4 }}
+  annotations:
+    kubernetes.io/ingress.class: {{ .Values.ingress.className | quote }}
+    {{- if .Values.ingress.staticIpName }}
+    kubernetes.io/ingress.global-static-ip-name: {{ .Values.ingress.staticIpName | quote }}
+    {{- end }}
+    {{- if .Values.ingress.tls.managedCertName }}
+    networking.gke.io/managed-certificates: {{ .Values.ingress.tls.managedCertName | quote }}
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  defaultBackend:
+    service:
+      name: {{ include "payment-orchestrator.fullname" . }}
+      port:
+        number: {{ .Values.service.port }}
+  rules:
+    {{- if .Values.ingress.host }}
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "payment-orchestrator.fullname" . }}
+                port:
+                  number: {{ .Values.service.port }}
+    {{- else }}
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "payment-orchestrator.fullname" . }}
+                port:
+                  number: {{ .Values.service.port }}
+    {{- end }}
+---
+{{- if .Values.ingress.tls.managedCertName }}
+# GKE Managed Certificate for automatic HTTPS
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: {{ .Values.ingress.tls.managedCertName }}
+  namespace: {{ include "payment-orchestrator.namespace" . }}
+spec:
+  domains:
+    - {{ .Values.ingress.host }}
+{{- end }}
+{{- end }}

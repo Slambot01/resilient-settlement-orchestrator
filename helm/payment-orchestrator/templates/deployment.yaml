@@ -1,0 +1,170 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Deployment — Payment Orchestrator Application
+# ─────────────────────────────────────────────────────────────────────────────
+# Runs the Go payment app with an optional Cloud SQL Auth Proxy sidecar.
+# Secrets are injected from the ExternalSecret-synced K8s Secret.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "payment-orchestrator.fullname" . }}
+  namespace: {{ include "payment-orchestrator.namespace" . }}
+  labels:
+    {{- include "payment-orchestrator.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "payment-orchestrator.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        {{- include "payment-orchestrator.selectorLabels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "payment-orchestrator.serviceAccountName" . }}
+      terminationGracePeriodSeconds: 30
+
+      # ── Security Context (Pod Level) ──────────────────────────────────
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 1000
+
+      containers:
+        # ── Application Container ───────────────────────────────────────
+        - name: payment-app
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.service.targetPort }}
+              name: http
+              protocol: TCP
+            - containerPort: {{ .Values.service.metricsPort }}
+              name: metrics
+              protocol: TCP
+
+          # ── Environment Variables ─────────────────────────────────────
+          env:
+            {{- range $key, $value := .Values.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            # GCP Pub/Sub project ID (derived from gcp.projectId)
+            {{- if .Values.gcp.projectId }}
+            - name: PUBSUB_PROJECT_ID
+              value: {{ .Values.gcp.projectId | quote }}
+            {{- end }}
+            # OpenTelemetry tracing
+            {{- if .Values.tracing.enabled }}
+            - name: OTEL_TRACING_ENABLED
+              value: "true"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.tracing.endpoint | quote }}
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: {{ .Values.tracing.sampleRate | quote }}
+            {{- end }}
+
+          # Secrets from External Secrets Operator
+          {{- if .Values.externalSecrets.enabled }}
+          envFrom:
+            - secretRef:
+                name: {{ include "payment-orchestrator.fullname" . }}-secrets
+          {{- end }}
+
+          # ── Resource Limits ───────────────────────────────────────────
+          resources:
+            {{- toYaml .Values.resources.app | nindent 12 }}
+
+          # ── Health Probes ─────────────────────────────────────────────
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+
+          # ── Security Context (Container Level) ────────────────────────
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+        # ── Cloud SQL Auth Proxy Sidecar ────────────────────────────────
+        {{- if .Values.cloudSqlProxy.enabled }}
+        - name: cloud-sql-proxy
+          image: {{ .Values.cloudSqlProxy.image }}
+          args:
+            - "--structured-logs"
+            - "--port=5432"
+            - {{ .Values.gcp.cloudSqlInstance | quote }}
+          ports:
+            - containerPort: 5432
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.resources.cloudSqlProxy | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+        {{- end }}
+
+      volumes:
+        - name: tmp
+          emptyDir: {}
+
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      # ── Pod Anti-Affinity ─────────────────────────────────────────────
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - payment-orchestrator
+                topologyKey: kubernetes.io/hostname
+
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

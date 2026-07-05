@@ -1,0 +1,104 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# values-prod.yaml — Production environment overrides
+# ─────────────────────────────────────────────────────────────────────────────
+# Usage: helm install payment-prod ./helm/payment-orchestrator \
+#          -f helm/payment-orchestrator/values-prod.yaml \
+#          -n payment-system --create-namespace
+
+replicaCount: 3
+
+image:
+  repository: asia-south1-docker.pkg.dev/YOUR_PROJECT_ID/payment-orchestrator-images/payment-orchestrator
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+gcp:
+  projectId: "YOUR_PROJECT_ID"
+  region: "asia-south1"
+  cloudSqlInstance: "YOUR_PROJECT_ID:asia-south1:payment-orchestrator-production-db"
+
+cloudSqlProxy:
+  enabled: true
+
+ingress:
+  enabled: true
+  className: "gce"
+  host: ""  # Set to your domain, e.g., api.yourdomain.com
+  tls:
+    enabled: false
+    managedCertName: ""  # e.g., payment-cert
+  staticIpName: ""       # e.g., payment-ip
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 15
+  targetCPUUtilization: 65
+  targetMemoryUtilization: 75
+
+pdb:
+  enabled: true
+  minAvailable: 2
+
+resources:
+  app:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+  cloudSqlProxy:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+tracing:
+  enabled: true
+  endpoint: "http://jaeger-collector.observability.svc:4318"
+  sampleRate: "0.1"  # Sample 10% of traces in production
+
+externalSecrets:
+  enabled: true
+  refreshInterval: "1h"
+  secrets:
+    - key: DB_PASSWORD
+      remoteKey: payment-orchestrator-production-db-password
+    - key: REDIS_HOST
+      remoteKey: payment-orchestrator-production-redis-host
+    - key: API_KEYS
+      remoteKey: payment-orchestrator-production-api-keys
+    - key: STRIPE_SECRET_KEY
+      remoteKey: payment-orchestrator-production-stripe-secret-key
+    - key: STRIPE_WEBHOOK_SECRET
+      remoteKey: payment-orchestrator-production-stripe-webhook-secret
+    - key: RAZORPAY_KEY_ID
+      remoteKey: payment-orchestrator-production-razorpay-key-id
+    - key: RAZORPAY_KEY_SECRET
+      remoteKey: payment-orchestrator-production-razorpay-key-secret
+
+env:
+  SERVER_ENV: "production"
+  SERVER_PORT: "8080"
+  METRICS_PORT: "9091"
+  DB_HOST: "localhost"
+  DB_PORT: "5432"
+  DB_USER: "payment_user"
+  DB_NAME: "payment_orchestrator"
+  DB_SSL_MODE: "disable"
+  DB_MAX_CONNS: "50"
+  DB_MIN_CONNS: "10"
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+  PUBSUB_ENABLED: "true"
+  PUBSUB_WEBHOOK_TOPIC: "webhook-events"
+  PUBSUB_EVENT_TOPIC: "payment-state-changes"
+  PUBSUB_SUBSCRIPTION: "webhook-processor"
+  PUBSUB_DLQ_TOPIC: "webhook-events-dlq"
+  PUBSUB_DLQ_SUBSCRIPTION: "webhook-dlq-reader"
+  PUBSUB_MAX_RETRIES: "5"
+  LOG_LEVEL: "info"
+  LOG_FORMAT: "json"

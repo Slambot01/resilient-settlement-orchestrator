@@ -1,0 +1,173 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Payment Orchestrator — Default Helm Values
+# ─────────────────────────────────────────────────────────────────────────────
+# Override per-environment with:
+#   helm install ... -f values-dev.yaml
+#   helm install ... -f values-prod.yaml
+
+# ── Replica count (overridden by HPA at runtime) ─────────────────────────────
+replicaCount: 2
+
+# ── Container image ──────────────────────────────────────────────────────────
+image:
+  repository: ""  # REQUIRED: e.g., us-docker.pkg.dev/my-project/repo/payment-orchestrator
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# ── GCP-specific configuration ───────────────────────────────────────────────
+gcp:
+  projectId: ""   # REQUIRED: e.g., my-gcp-project-123
+  region: ""      # REQUIRED: e.g., asia-south1
+  cloudSqlInstance: ""  # REQUIRED: e.g., my-project:asia-south1:payment-db
+
+# ── Service Account ──────────────────────────────────────────────────────────
+serviceAccount:
+  create: true
+  name: payment-app
+  annotations: {}
+  # Workload Identity annotation is auto-generated from gcp.projectId;
+  # add extra annotations here if needed.
+
+# ── Kubernetes Service ───────────────────────────────────────────────────────
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+  metricsPort: 9091
+  annotations:
+    cloud.google.com/neg: '{"ingress": true}'
+
+# ── Ingress (GCP HTTPS Load Balancer) ────────────────────────────────────────
+ingress:
+  enabled: true
+  className: "gce"
+  host: ""  # e.g., api.yourdomain.com (leave empty for default backend)
+  tls:
+    enabled: false
+    managedCertName: ""  # GKE managed cert name
+  staticIpName: ""       # gcloud compute addresses create <name> --global
+  annotations: {}
+
+# ── Horizontal Pod Autoscaler ────────────────────────────────────────────────
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilization: 70
+  targetMemoryUtilization: 80
+  scaleUp:
+    stabilizationWindowSeconds: 30
+    maxPodsPerMinute: 2
+  scaleDown:
+    stabilizationWindowSeconds: 300
+    maxPodsPerInterval: 1
+    periodSeconds: 120
+
+# ── Pod Disruption Budget ────────────────────────────────────────────────────
+pdb:
+  enabled: true
+  minAvailable: 1
+
+# ── Network Policy ───────────────────────────────────────────────────────────
+networkPolicy:
+  enabled: true
+
+# ── Resource requests/limits ─────────────────────────────────────────────────
+resources:
+  app:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  cloudSqlProxy:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# ── Cloud SQL Auth Proxy sidecar ─────────────────────────────────────────────
+cloudSqlProxy:
+  enabled: true
+  image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.3
+
+# ── Health probes ────────────────────────────────────────────────────────────
+probes:
+  liveness:
+    path: /healthz
+    initialDelaySeconds: 10
+    periodSeconds: 15
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readiness:
+    path: /readyz
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+# ── OpenTelemetry Tracing ────────────────────────────────────────────────────
+tracing:
+  enabled: true
+  endpoint: "http://jaeger-collector.observability.svc:4318"
+  sampleRate: "1.0"
+
+# ── Application environment variables ────────────────────────────────────────
+# These are injected as env vars into the app container.
+# Secrets (DB_PASSWORD, API_KEYS, etc.) come from ExternalSecret below.
+env:
+  SERVER_ENV: "production"
+  SERVER_PORT: "8080"
+  METRICS_PORT: "9091"
+  # Database (connects via Cloud SQL Proxy on localhost)
+  DB_HOST: "localhost"
+  DB_PORT: "5432"
+  DB_USER: "payment_user"
+  DB_NAME: "payment_orchestrator"
+  DB_SSL_MODE: "disable"
+  DB_MAX_CONNS: "25"
+  DB_MIN_CONNS: "5"
+  # Redis
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+  # Pub/Sub
+  PUBSUB_ENABLED: "true"
+  PUBSUB_WEBHOOK_TOPIC: "webhook-events"
+  PUBSUB_EVENT_TOPIC: "payment-state-changes"
+  PUBSUB_SUBSCRIPTION: "webhook-processor"
+  PUBSUB_DLQ_TOPIC: "webhook-events-dlq"
+  PUBSUB_DLQ_SUBSCRIPTION: "webhook-dlq-reader"
+  PUBSUB_MAX_RETRIES: "5"
+  # Logging
+  LOG_LEVEL: "info"
+  LOG_FORMAT: "json"
+
+# ── External Secrets (GCP Secret Manager → K8s Secrets) ──────────────────────
+externalSecrets:
+  enabled: true
+  refreshInterval: "1h"
+  secrets:
+    - key: DB_PASSWORD
+      remoteKey: payment-orchestrator-db-password
+    - key: REDIS_HOST
+      remoteKey: payment-orchestrator-redis-host
+    - key: API_KEYS
+      remoteKey: payment-orchestrator-api-keys
+    - key: STRIPE_SECRET_KEY
+      remoteKey: payment-orchestrator-stripe-secret-key
+    - key: STRIPE_WEBHOOK_SECRET
+      remoteKey: payment-orchestrator-stripe-webhook-secret
+    - key: RAZORPAY_KEY_ID
+      remoteKey: payment-orchestrator-razorpay-key-id
+    - key: RAZORPAY_KEY_SECRET
+      remoteKey: payment-orchestrator-razorpay-key-secret
+
+# ── Pod scheduling ───────────────────────────────────────────────────────────
+nodeSelector: {}
+tolerations: []
+podAnnotations: {}
